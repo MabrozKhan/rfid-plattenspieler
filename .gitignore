@@ -1,0 +1,35 @@
+# Zugangsdaten, niemals hochladen
+firmware/secrets.h
+secrets.h
+.env
+*.token
+.cache
+.cache-*
+token.json
+tokens.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# PlatformIO und Arduino
+.pio/
+build/
+*.bin
+*.elf
+
+# Editoren
+.vscode/
+.idea/
+
+# Slicer und CAD, temporäre Dateien
+*.gcode
+*.bak
+*.tmp
+
+# Betriebssystem
+Thumbs.db
+desktop.ini
+.DS_Store
