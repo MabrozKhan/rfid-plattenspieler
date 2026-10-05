@@ -6,8 +6,7 @@ Der Spotify-Link steckt in der Platte, nicht im Gerät. Dadurch läuft jede Plat
 
 ## Status
 
-Projektstart. Noch nichts umgesetzt.
-
+Repository eingerichtet, als Nächstes Phase 1.
 - [ ] Phase 1: RFID am ESP32
 - [ ] Phase 2: Spotify am PC testen
 - [ ] Phase 3: Beides zusammenführen
