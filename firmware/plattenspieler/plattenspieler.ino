@@ -116,6 +116,10 @@ void verbindeWlan() {
     delay(500);
     Serial.print('.');
   }
+  // Stromsparmodus des WLAN-Moduls ausschalten. Im Sparmodus schläft das
+  // Funkmodul zwischendurch, was Verbindungen verzögern oder scheitern lassen
+  // kann. Am USB-Netzteil spielt der Mehrverbrauch keine Rolle.
+  WiFi.setSleep(false);
   Serial.print(" verbunden, IP: ");
   Serial.println(WiFi.localIP());
 }
@@ -145,10 +149,10 @@ String jsonWert(const String& json, const char* schluessel) {
   return json.substring(pos, ende);
 }
 
-// Schickt eine HTTPS-Anfrage. Gibt den Statuscode zurück, die Antwort landet
+// Schickt EINE HTTPS-Anfrage. Gibt den Statuscode zurück, die Antwort landet
 // in "antwort". Negative Codes bedeuten: Verbindung kam nicht zustande.
-int sendeHttps(const char* methode, const String& url, const String& koerper,
-               const char* contentType, bool mitToken, String& antwort) {
+int sendeHttpsEinmal(const char* methode, const String& url, const String& koerper,
+                     const char* contentType, bool mitToken, String& antwort) {
   WiFiClientSecure client;
   // Vereinfachung für den Prototyp: Das Zertifikat von Spotify wird nicht
   // geprüft. Die Verbindung ist trotzdem verschlüsselt. Für die fertige
@@ -175,7 +179,31 @@ int sendeHttps(const char* methode, const String& url, const String& koerper,
   if (status > 0 && status != 204 && http.getSize() != 0) {
     antwort = http.getString();
   }
+  if (status < 0) {
+    // Fehler auf Verbindungsebene. Zur Fehlersuche geben wir den Klartext,
+    // den freien Arbeitsspeicher und die WLAN-Signalstärke aus.
+    Serial.printf("  Verbindungsfehler %d (%s), freier Speicher %u Byte, WLAN %d dBm\n",
+                  status, http.errorToString(status).c_str(),
+                  (unsigned)ESP.getFreeHeap(), (int)WiFi.RSSI());
+  }
   http.end();
+  return status;
+}
+
+// Schickt eine HTTPS-Anfrage und versucht es bei einem Verbindungsfehler
+// bis zu dreimal. Wiederholt wird nur bei Code -1 ("Verbindung kam nicht
+// zustande"). In dem Fall ist sicher nichts bei Spotify angekommen. Bei
+// anderen Fehlern könnte der Befehl schon ausgeführt sein, und ein zweiter
+// Versuch würde z. B. zwei Titel weiterspringen.
+int sendeHttps(const char* methode, const String& url, const String& koerper,
+               const char* contentType, bool mitToken, String& antwort) {
+  int status = 0;
+  for (uint8_t versuch = 1; versuch <= 3; versuch++) {
+    status = sendeHttpsEinmal(methode, url, koerper, contentType, mitToken, antwort);
+    if (status != -1) break;
+    Serial.printf("  Versuch %u fehlgeschlagen, neuer Versuch...\n", versuch);
+    delay(300);
+  }
   return status;
 }
 
