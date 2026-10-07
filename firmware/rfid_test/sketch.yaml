@@ -1,0 +1,2 @@
+# Voreinstellung für diesen Sketch: Board "ESP32 Dev Module"
+default_fqbn: esp32:esp32:esp32
