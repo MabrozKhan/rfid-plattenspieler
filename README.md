@@ -37,4 +37,4 @@ Der ausführliche Plan steht in [docs/projektplan.md](docs/projektplan.md).
 
 ## Zugangsdaten
 
-WLAN-Passwort, Spotify Client Secret und Refresh Token gehören in `firmware/secrets.h`. Diese Datei steht in der `.gitignore` und wird nicht hochgeladen. Als Vorlage dient `firmware/secrets.example.h`.
+WLAN-Passwort, Spotify Client Secret und Refresh Token gehören in `firmware/plattenspieler/secrets.h`. Diese Datei steht in der `.gitignore` und wird nicht hochgeladen. Als Vorlage dient `firmware/plattenspieler/secrets.example.h`.
