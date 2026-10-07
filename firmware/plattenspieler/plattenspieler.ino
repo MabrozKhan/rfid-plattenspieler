@@ -23,6 +23,11 @@
                     (niemals an 5 V, die Eingänge des ESP32 vertragen nur 3,3 V)
     Taster Weiter:  zwischen GPIO 32 und GND
     Taster Zurück:  zwischen GPIO 33 und GND
+
+  Schrittmotor 28BYJ-48 mit Treiberplatine ULN2003:
+    IN1 an GPIO 25, IN2 an GPIO 26, IN3 an GPIO 27, IN4 an GPIO 14
+    Plus (+) der Treiberplatine an 5 V (Pin VIN bzw. 5V am ESP32), Minus an GND
+    Der Motor bekommt seinen Strom über die Treiberplatine, nie direkt vom GPIO.
 */
 
 #include <SPI.h>               // Bus zum RC522
@@ -51,6 +56,17 @@ const uint8_t FEHLVERSUCHE_BIS_WEG = 4;
 // NTAG213: Die Nutzdaten liegen auf Seite 4 bis 39, das sind 36 x 4 = 144 Byte.
 const uint8_t  ERSTE_SEITE   = 4;
 const uint16_t NUTZDATEN_LEN = 144;
+
+// --- Schrittmotor für den Teller ---
+// Vier Leitungen zur Treiberplatine ULN2003, Reihenfolge IN1 bis IN4.
+const uint8_t PIN_MOTOR[4] = { 25, 26, 27, 14 };
+// Zeit zwischen zwei Halbschritten in Millisekunden. Der 28BYJ-48 braucht
+// 4096 Halbschritte pro Umdrehung.
+//   2 ms  ->  etwa 7 Umdrehungen pro Minute (läuft sicher an)
+//   1 ms  ->  etwa 15 Umdrehungen pro Minute (Obergrenze dieses Motors)
+const uint32_t MOTOR_SCHRITT_MS = 2;
+// Drehrichtung umkehren: true oder false
+const bool MOTOR_RUECKWAERTS = false;
 
 // --- Bedienelemente ---
 // Das Poti muss an einen Pin von ADC1 (GPIO 32 bis 39). Die Pins von ADC2
@@ -102,6 +118,10 @@ struct Taster {
 };
 Taster tasterWeiter  = { PIN_WEITER,  false, false, 0 };
 Taster tasterZurueck = { PIN_ZURUECK, false, false, 0 };
+
+// Schalter für den Motor. "volatile", weil zwei Programmteile gleichzeitig
+// darauf zugreifen: die Hauptschleife schreibt, die Motor-Aufgabe liest.
+volatile bool motorSollDrehen = false;
 
 // ===========================================================================
 // Teil 1: WLAN
@@ -496,6 +516,7 @@ void platteAufgelegt(const String& uri) {
   Serial.print("Starte von vorne: ");
   Serial.println(uri);
   if (spiele(uri)) {
+    motorSollDrehen = true;          // Teller dreht, sobald die Musik läuft
     // Erst nach dem Start, damit die Musik ohne Verzögerung losgeht.
     zufallAus();
   }
@@ -503,7 +524,56 @@ void platteAufgelegt(const String& uri) {
 
 void platteWeggenommen() {
   Serial.println("Platte weg, Pause.");
+  motorSollDrehen = false;           // Teller sofort anhalten
   pausiere();
+}
+
+// ===========================================================================
+// Teil 4b: Schrittmotor
+// ===========================================================================
+// Der Motor läuft in einer eigenen Aufgabe (Task), unabhängig von loop().
+// Der Grund: Eine Anfrage an Spotify blockiert loop() für etwa eine Sekunde.
+// Würden wir die Schritte in loop() ausgeben, bliebe der Teller bei jedem
+// Befehl kurz stehen. Der ESP32 kann mehrere Aufgaben nebeneinander ausführen
+// (Betriebssystem FreeRTOS), das nutzen wir hier.
+void motorTask(void* parameter) {
+  // Halbschritt-Folge: Welche der vier Spulen sind in welchem Schritt an?
+  // Jedes Bit steht für eine Leitung, von links nach rechts IN1 bis IN4.
+  // Abwechselnd ist eine Spule und dann zwei benachbarte Spulen an. Das gibt
+  // einen ruhigeren Lauf als reine Vollschritte.
+  const uint8_t MUSTER[8] = {
+    0b1000, 0b1100, 0b0100, 0b0110,
+    0b0010, 0b0011, 0b0001, 0b1001
+  };
+  uint8_t schritt = 0;
+  bool spulenAn = false;
+  TickType_t letzterSchritt = xTaskGetTickCount();
+
+  for (;;) {                                   // Endlosschleife der Aufgabe
+    if (motorSollDrehen) {
+      for (uint8_t i = 0; i < 4; i++) {
+        digitalWrite(PIN_MOTOR[i], (MUSTER[schritt] >> (3 - i)) & 1);
+      }
+      // Zum nächsten Muster weitergehen, vorwärts oder rückwärts.
+      // "& 7" lässt den Zähler von 7 wieder auf 0 springen und umgekehrt.
+      schritt = (schritt + (MOTOR_RUECKWAERTS ? 7 : 1)) & 7;
+      spulenAn = true;
+      // Exakt im Takt warten. vTaskDelayUntil gleicht kleine Verzögerungen
+      // aus, damit die Drehzahl gleichmäßig bleibt.
+      vTaskDelayUntil(&letzterSchritt, pdMS_TO_TICKS(MOTOR_SCHRITT_MS));
+    } else {
+      if (spulenAn) {
+        // Alle Spulen abschalten. Sonst fließt im Stand dauerhaft Strom,
+        // und der Motor wird warm.
+        for (uint8_t i = 0; i < 4; i++) {
+          digitalWrite(PIN_MOTOR[i], LOW);
+        }
+        spulenAn = false;
+      }
+      vTaskDelay(pdMS_TO_TICKS(20));           // im Stand nur selten nachschauen
+      letzterSchritt = xTaskGetTickCount();
+    }
+  }
 }
 
 // ===========================================================================
@@ -597,6 +667,15 @@ void setup() {
   delay(500);
   Serial.println();
   Serial.println("=== RFID-Plattenspieler ===");
+
+  // --- Schrittmotor ---
+  for (uint8_t i = 0; i < 4; i++) {
+    pinMode(PIN_MOTOR[i], OUTPUT);
+    digitalWrite(PIN_MOTOR[i], LOW);
+  }
+  // Motor-Aufgabe starten: Name "motor", 2048 Byte Stapelspeicher,
+  // Priorität 2 (höher als loop() mit 1), auf Prozessorkern 1.
+  xTaskCreatePinnedToCore(motorTask, "motor", 2048, NULL, 2, NULL, 1);
 
   // --- Bedienelemente ---
   pinMode(PIN_WEITER, INPUT_PULLUP);
