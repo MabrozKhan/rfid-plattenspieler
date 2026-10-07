@@ -4,7 +4,9 @@
   Ablauf:
     Platte (NFC-Sticker) auflegen  ->  Link auslesen  ->  Album/Playlist startet
     Platte wegnehmen               ->  Pause
-    Dieselbe Platte wieder drauf   ->  es geht an der alten Stelle weiter
+    Platte wieder auflegen         ->  startet immer von vorne, beim ersten Titel
+    Poti drehen                    ->  Lautstärke
+    Taster "Weiter" / "Zurück"     ->  nächster / vorheriger Titel
 
   Board in der Arduino IDE:  ESP32 Dev Module
   Bibliothek:                MFRC522 (von GithubCommunity / miguelbalboa)
@@ -15,6 +17,12 @@
 
   Verkabelung RC522 -> ESP32:
     SDA 5, SCK 18, MOSI 23, MISO 19, RST 22, GND, 3.3V an 3V3 (niemals 5 V)
+
+  Bedienelemente:
+    Poti (B5K):     linker Pin an GND, mittlerer Pin an GPIO 34, rechter Pin an 3V3
+                    (niemals an 5 V, die Eingänge des ESP32 vertragen nur 3,3 V)
+    Taster Weiter:  zwischen GPIO 32 und GND
+    Taster Zurück:  zwischen GPIO 33 und GND
 */
 
 #include <SPI.h>               // Bus zum RC522
@@ -44,6 +52,27 @@ const uint8_t FEHLVERSUCHE_BIS_WEG = 4;
 const uint8_t  ERSTE_SEITE   = 4;
 const uint16_t NUTZDATEN_LEN = 144;
 
+// --- Bedienelemente ---
+// Das Poti muss an einen Pin von ADC1 (GPIO 32 bis 39). Die Pins von ADC2
+// funktionieren nicht, solange das WLAN läuft.
+const uint8_t PIN_POTI   = 34;
+// Die Taster schalten gegen GND. Der ESP32 zieht den Pin intern auf 3,3 V
+// (INPUT_PULLUP), gedrückt liegt er auf 0 V. So braucht man keinen Widerstand.
+// GPIO 34 bis 39 haben keinen internen Pull-up, deshalb 32 und 33.
+const uint8_t PIN_WEITER = 32;
+const uint8_t PIN_ZURUECK = 33;
+
+// Lautstärke erst senden, wenn sie sich um mindestens so viele Prozentpunkte
+// geändert hat. Der Analogeingang des ESP32 rauscht, ohne diese Schwelle
+// würden ständig Befehle rausgehen.
+const uint8_t  LAUTSTAERKE_SCHWELLE   = 3;
+// Höchstens so oft einen Lautstärkebefehl senden (Spotify begrenzt die Anzahl
+// der Anfragen, und jede Anfrage blockiert das Programm kurz).
+const uint32_t LAUTSTAERKE_ABSTAND_MS = 400;
+// Entprellzeit der Taster: Mechanische Kontakte "prellen" beim Drücken und
+// liefern für einige Millisekunden mehrere Flanken.
+const uint32_t TASTER_ENTPRELL_MS     = 50;
+
 // ---------------------------------------------------------------------------
 // Globale Objekte und Zustände
 // ---------------------------------------------------------------------------
@@ -57,8 +86,22 @@ uint32_t tokenGueltigBis = 0;      // Zeitpunkt (millis), ab dem erneuert wird
 bool     platteLiegtAuf  = false;  // aktueller Zustand
 bool     platteGelesen   = false;  // wurde der Link dieser Platte schon gelesen?
 uint8_t  fehlversuche    = 0;      // Zähler fürs Entprellen
-String   letzteUri;                // zuletzt gestartetes Album bzw. Playlist
 uint32_t letzteAbfrage   = 0;
+
+float    potiGeglaettet     = -1;  // geglätteter Messwert, -1 = noch keiner
+int      lautstaerkeGesendet = -1; // zuletzt gesendeter Wert in Prozent
+uint32_t letzteLautstaerke  = 0;   // Zeitpunkt des letzten Lautstärkebefehls
+uint32_t letztePotiMessung  = 0;
+
+// Zustand eines Tasters fürs Entprellen
+struct Taster {
+  uint8_t  pin;
+  bool     gedrueckt;       // entprellter Zustand
+  bool     letzterRohwert;  // letzter direkt gelesener Wert
+  uint32_t letzteAenderung; // wann sich der Rohwert zuletzt geändert hat
+};
+Taster tasterWeiter  = { PIN_WEITER,  false, false, 0 };
+Taster tasterZurueck = { PIN_ZURUECK, false, false, 0 };
 
 // ===========================================================================
 // Teil 1: WLAN
@@ -175,8 +218,13 @@ bool tokenBereit() {
   return erneuereToken();
 }
 
-// Schickt einen Befehl an den Spotify-Player (play oder pause).
-bool playerBefehl(const char* befehl, const String& koerper) {
+// Schickt einen Befehl an den Spotify-Player.
+//   methode    "PUT" oder "POST", je nach Befehl
+//   befehl     play, pause, volume, next oder previous
+//   parameter  zusätzliche Angaben für die Adresse, z. B. "&volume_percent=40"
+//   koerper    Inhalt der Anfrage als JSON
+bool playerBefehl(const char* methode, const char* befehl,
+                  const String& parameter, const String& koerper) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Kein WLAN, Befehl nicht gesendet.");
     return false;
@@ -184,13 +232,13 @@ bool playerBefehl(const char* befehl, const String& koerper) {
   if (!tokenBereit()) return false;
 
   String url = String("https://api.spotify.com/v1/me/player/") + befehl +
-               "?device_id=" + SPOTIFY_DEVICE_ID;
+               "?device_id=" + SPOTIFY_DEVICE_ID + parameter;
   String antwort;
-  int status = sendeHttps("PUT", url, koerper, "application/json", true, antwort);
+  int status = sendeHttps(methode, url, koerper, "application/json", true, antwort);
 
   // 401 heißt: Token doch schon abgelaufen. Einmal erneuern und wiederholen.
   if (status == 401 && erneuereToken()) {
-    status = sendeHttps("PUT", url, koerper, "application/json", true, antwort);
+    status = sendeHttps(methode, url, koerper, "application/json", true, antwort);
   }
 
   if (status == 200 || status == 202 || status == 204) {
@@ -205,21 +253,39 @@ bool playerBefehl(const char* befehl, const String& koerper) {
   return false;
 }
 
-// Startet ein Album, eine Playlist oder einen Titel.
+// Startet ein Album, eine Playlist oder einen Titel, und zwar immer von vorne.
+// Wie bei einer echten Platte: Auflegen heißt, es beginnt mit dem ersten Lied.
 bool spiele(const String& uri) {
   String koerper;
   if (uri.startsWith("spotify:track:")) {
-    koerper = "{\"uris\":[\"" + uri + "\"]}";        // einzelner Titel
+    // Einzelner Titel, ab Sekunde 0.
+    koerper = "{\"uris\":[\"" + uri + "\"],\"position_ms\":0}";
   } else {
-    koerper = "{\"context_uri\":\"" + uri + "\"}";   // Album oder Playlist
+    // Album oder Playlist.
+    //   offset position 0  = mit dem ersten Titel beginnen
+    //   position_ms 0      = diesen Titel ab Sekunde 0 spielen
+    // Ohne diese Angaben macht Spotify manchmal dort weiter, wo man in
+    // diesem Album zuletzt aufgehört hat.
+    koerper = "{\"context_uri\":\"" + uri +
+              "\",\"offset\":{\"position\":0},\"position_ms\":0}";
   }
-  return playerBefehl("play", koerper);
+  return playerBefehl("PUT", "play", "", koerper);
 }
 
-// Setzt die Wiedergabe an der alten Stelle fort (leerer Auftrag = weiter).
-bool weiter() { return playerBefehl("play", "{}"); }
+// Zufallswiedergabe ausschalten, damit die Titel in der richtigen Reihenfolge
+// kommen. Sonst wäre nach dem ersten Lied Schluss mit der Plattenreihenfolge.
+bool zufallAus() { return playerBefehl("PUT", "shuffle", "&state=false", "{}"); }
 
-bool pausiere() { return playerBefehl("pause", "{}"); }
+bool pausiere() { return playerBefehl("PUT", "pause", "", "{}"); }
+
+// Lautstärke in Prozent (0 bis 100) setzen.
+bool setzeLautstaerke(int prozent) {
+  return playerBefehl("PUT", "volume", "&volume_percent=" + String(prozent), "{}");
+}
+
+// Nächster und vorheriger Titel. Diese beiden Befehle erwartet Spotify als POST.
+bool naechsterTitel()  { return playerBefehl("POST", "next", "", "{}"); }
+bool vorherigerTitel() { return playerBefehl("POST", "previous", "", "{}"); }
 
 // ===========================================================================
 // Teil 3: NFC-Sticker lesen und Link auswerten
@@ -398,24 +464,101 @@ String leseUriVomSticker(bool& leseFehler) {
 // Teil 4: Was passiert beim Auflegen und Wegnehmen
 // ===========================================================================
 void platteAufgelegt(const String& uri) {
-  if (uri == letzteUri) {
-    // Dieselbe Platte wie vorher: an der alten Stelle weiterspielen.
-    Serial.println("Gleiche Platte, Wiedergabe wird fortgesetzt.");
-    if (!weiter()) {
-      spiele(uri);   // falls Fortsetzen nicht geht, von vorne starten
-    }
-  } else {
-    Serial.print("Starte ");
-    Serial.println(uri);
-    if (spiele(uri)) {
-      letzteUri = uri;
-    }
+  // Jedes Auflegen startet die Platte von vorne, egal was vorher lief.
+  Serial.print("Starte von vorne: ");
+  Serial.println(uri);
+  if (spiele(uri)) {
+    // Erst nach dem Start, damit die Musik ohne Verzögerung losgeht.
+    zufallAus();
   }
 }
 
 void platteWeggenommen() {
   Serial.println("Platte weg, Pause.");
   pausiere();
+}
+
+// ===========================================================================
+// Teil 5: Poti und Taster
+// ===========================================================================
+
+// Liest das Poti und gibt die Stellung in Prozent zurück (0 bis 100).
+int lesePotiProzent() {
+  // 16 Messungen mitteln, das nimmt das gröbste Rauschen heraus.
+  uint32_t summe = 0;
+  for (uint8_t i = 0; i < 16; i++) {
+    summe += analogRead(PIN_POTI);          // Wert von 0 bis 4095 (12 Bit)
+  }
+  float messwert = summe / 16.0f;
+
+  // Zusätzlich gleitend glätten: Der neue Wert zählt nur zu 30 Prozent,
+  // der bisherige zu 70 Prozent. Das beruhigt die Anzeige weiter.
+  if (potiGeglaettet < 0) {
+    potiGeglaettet = messwert;              // erster Durchlauf
+  } else {
+    potiGeglaettet = 0.7f * potiGeglaettet + 0.3f * messwert;
+  }
+
+  // Der Analogeingang des ESP32 ist an den Rändern ungenau. Deshalb werten
+  // wir nur den Bereich von 150 bis 3950 aus. So erreicht man 0 und 100
+  // Prozent sicher, auch wenn das Poti nicht ganz bis zum Anschlag misst.
+  long prozent = map((long)potiGeglaettet, 150, 3950, 0, 100);
+  return constrain(prozent, 0, 100);
+}
+
+// Prüft das Poti und schickt bei einer Änderung die neue Lautstärke.
+void pruefePoti() {
+  if (millis() - letztePotiMessung < 100) return;   // zehnmal pro Sekunde reicht
+  letztePotiMessung = millis();
+
+  int prozent = lesePotiProzent();
+
+  // Beim Einschalten nur merken, nicht senden. Sonst würde die Lautstärke
+  // bei jedem Start ungefragt auf die Poti-Stellung springen.
+  if (lautstaerkeGesendet < 0) {
+    lautstaerkeGesendet = prozent;
+    return;
+  }
+
+  bool deutlichGeaendert = abs(prozent - lautstaerkeGesendet) >= LAUTSTAERKE_SCHWELLE;
+  // Die Anschläge 0 und 100 immer übernehmen, auch bei kleiner Änderung.
+  bool anschlagErreicht  = (prozent == 0 || prozent == 100) && prozent != lautstaerkeGesendet;
+  bool abstandOk         = millis() - letzteLautstaerke >= LAUTSTAERKE_ABSTAND_MS;
+
+  if ((deutlichGeaendert || anschlagErreicht) && abstandOk) {
+    letzteLautstaerke = millis();
+    lautstaerkeGesendet = prozent;   // auch bei Fehler merken, sonst Dauerfeuer
+    Serial.printf("Lautstärke: %d %%\n", prozent);
+    setzeLautstaerke(prozent);
+  }
+}
+
+// Gibt genau einmal "true" zurück, wenn der Taster neu gedrückt wurde.
+bool tasterGedrueckt(Taster& t) {
+  bool rohwert = (digitalRead(t.pin) == LOW);       // LOW = gedrückt (schaltet gegen GND)
+
+  if (rohwert != t.letzterRohwert) {                // Wert hat sich geändert:
+    t.letzterRohwert = rohwert;                     // merken und Stoppuhr starten
+    t.letzteAenderung = millis();
+  }
+
+  // Erst wenn der Wert länger als die Entprellzeit stabil ist, gilt er.
+  if (millis() - t.letzteAenderung > TASTER_ENTPRELL_MS && rohwert != t.gedrueckt) {
+    t.gedrueckt = rohwert;
+    return t.gedrueckt;                             // true nur beim Drücken, nicht beim Loslassen
+  }
+  return false;
+}
+
+void pruefeTaster() {
+  if (tasterGedrueckt(tasterWeiter)) {
+    Serial.println("Taster: nächster Titel");
+    naechsterTitel();
+  }
+  if (tasterGedrueckt(tasterZurueck)) {
+    Serial.println("Taster: vorheriger Titel");
+    vorherigerTitel();
+  }
 }
 
 // ===========================================================================
@@ -426,6 +569,11 @@ void setup() {
   delay(500);
   Serial.println();
   Serial.println("=== RFID-Plattenspieler ===");
+
+  // --- Bedienelemente ---
+  pinMode(PIN_WEITER, INPUT_PULLUP);
+  pinMode(PIN_ZURUECK, INPUT_PULLUP);
+  // GPIO 34 ist ein reiner Eingang, für analogRead ist kein pinMode nötig.
 
   // --- RFID-Leser ---
   SPI.begin();
@@ -466,7 +614,11 @@ void setup() {
 // loop(): läuft in Dauerschleife
 // ===========================================================================
 void loop() {
-  // Nur alle 250 ms nachschauen, dazwischen sofort zurückkehren.
+  // Taster und Poti bei jedem Durchlauf prüfen, damit sie schnell reagieren.
+  pruefeTaster();
+  pruefePoti();
+
+  // Nach der Platte nur alle 250 ms schauen, dazwischen sofort zurückkehren.
   if (millis() - letzteAbfrage < ABFRAGE_INTERVALL_MS) return;
   letzteAbfrage = millis();
 
