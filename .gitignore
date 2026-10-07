@@ -33,3 +33,6 @@ build/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Spotify-Testskript
+spotify_config.json
