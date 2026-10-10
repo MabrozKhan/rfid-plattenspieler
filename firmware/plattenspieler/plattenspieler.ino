@@ -12,7 +12,8 @@
     Taster Weiter / Zurück     nächster / vorheriger Titel, geht auch in der Pause
 
   Board in der Arduino IDE   ESP32 Dev Module
-  Bibliothek                 MFRC522 (von GithubCommunity / miguelbalboa)
+  Bibliotheken               MFRC522 (GithubCommunity), Adafruit SSD1306,
+                             Adafruit GFX, ArduinoJson (Version 7, Benoit Blanchon)
   Serieller Monitor          115200 Baud
   Zugangsdaten               secrets.h (Vorlage secrets.example.h)
 
@@ -23,6 +24,7 @@
     Taster Weiter    zwischen GPIO 32 und GND
     Taster Zurück    zwischen GPIO 33 und GND
     Tonarm-Schalter  Mikroschalter, COM an GND, NO an GPIO 16
+    Display SSD1306  128 x 32, I2C: SDA an GPIO 21, SCL an GPIO 4, VCC an 3V3, GND
 
   Aufbau des Programms
     Das Programm besteht aus drei Aufgaben (Tasks), die nebeneinander laufen.
@@ -46,6 +48,10 @@
 #include <WiFiClientSecure.h>  // verschlüsselte Verbindung (HTTPS)
 #include <HTTPClient.h>        // nur für die Token-Anfrage
 #include <Preferences.h>       // dauerhafter Speicher im Flash des ESP32
+#include <Wire.h>              // I2C-Bus zum Display
+#include <Adafruit_GFX.h>      // Grafikfunktionen (Text, Linien, Rechtecke)
+#include <Adafruit_SSD1306.h>  // Treiber für das OLED-Display
+#include <ArduinoJson.h>       // liest die Titelinfos aus der Spotify-Antwort
 
 #include "secrets.h"           // WLAN, Client-ID, Refresh Token, Geräte-ID
 
@@ -110,6 +116,16 @@ const uint32_t ANTWORT_FRIST_MS       = 8000;    // so lange auf eine Antwort wa
 // Wurde die Lautstärke so lange nicht verändert, holen wir vor der nächsten
 // Änderung den echten Wert von Spotify. Er könnte per Sprache geändert worden sein.
 const uint32_t LAUTSTAERKE_NEU_LESEN_MS = 10000;
+// So oft wird beim Abspielen nachgefragt, welcher Titel gerade läuft.
+const uint32_t TITEL_ABFRAGE_MS = 5000;
+
+// --- Display ---
+// GPIO 22 ist schon vom RC522 belegt, deshalb SCL auf GPIO 4.
+const uint8_t  PIN_OLED_SDA  = 21;
+const uint8_t  PIN_OLED_SCL  = 4;
+const uint8_t  OLED_ADRESSE  = 0x3C;
+const uint32_t EINBLENDUNG_MS = 1500;   // so lange bleibt die große Lautstärke-Anzeige
+const uint32_t HINWEIS_MS     = 4000;   // so lange bleibt ein Hinweis stehen
 
 // ===========================================================================
 // Typen und gemeinsame Daten
@@ -178,6 +194,23 @@ int              lautstaerke     = -1;   // -1 = noch unbekannt
 int              lautVorStumm    = 30;
 uint32_t         letzteLautAktion = 0;
 String           geraetId = SPOTIFY_DEVICE_ID;   // kann sich zur Laufzeit ändern
+uint32_t         naechsteTitelAbfrage = 0;
+bool             anfrageProtokoll = true;         // false = Anfrage nicht im Monitor zeigen
+
+// --- Display ---
+// Breite 128, Höhe 32 Pixel, an Wire (I2C), kein eigener Reset-Pin.
+Adafruit_SSD1306 display(128, 32, &Wire, -1);
+bool             displayOk = false;
+// Was angezeigt wird. Die Texte schreiben spotifyTask und loop(), lesen tut
+// der Display-Task. Die Sperre verhindert, dass ein halber Text gelesen wird.
+SemaphoreHandle_t anzeigeSperre;
+String           anzeigeTitel;
+String           anzeigeInterpret;
+String           anzeigeAlbum;
+String           anzeigeHinweis;
+volatile uint32_t hinweisBis      = 0;
+volatile int     anzeigeLautstaerke = -1;
+volatile uint32_t einblendungBis  = 0;
 
 // ===========================================================================
 // Teil 1: WLAN
@@ -378,6 +411,7 @@ int apiAnfrageEinmal(const char* methode, const String& pfad,
       leseZeile(zeile, frist);
     }
   } else if (laenge >= 0) {
+    antwort.reserve(laenge + 1);                  // Platz vorab reservieren, spart Zeit
     ok = leseBytes(antwort, (size_t)laenge, frist);
   } else {
     // Weder Länge noch Blöcke: Der Server schließt am Ende die Verbindung.
@@ -406,8 +440,10 @@ int apiAnfrage(const char* methode, const String& pfad,
   // Für die Ausgabe nur den Teil vor dem '?' zeigen, die Geräte-ID ist lang.
   int frage = pfad.indexOf('?');
   String kurz = (frage >= 0) ? pfad.substring(0, frage) : pfad;
-  Serial.printf("  %s %s -> %d (%lu ms)\n", methode, kurz.c_str(), status,
-                (unsigned long)(millis() - start));
+  if (anfrageProtokoll || status < 0 || status >= 300) {
+    Serial.printf("  %s %s -> %d (%lu ms)\n", methode, kurz.c_str(), status,
+                  (unsigned long)(millis() - start));
+  }
   return status;
 }
 
@@ -446,6 +482,7 @@ bool findeGeraet() {
   }
   if (!gefunden) {
     Serial.println("  Echo nicht in der Liste. Er ist für Spotify gerade nicht erreichbar.");
+    zeigeHinweis("Echo nicht erreichbar");
     Serial.println("  Tipp: einmal \"Alexa, spiele Spotify\" sagen, dann erneut versuchen.");
   }
   return gefunden;
@@ -530,6 +567,12 @@ void spotifyTask(void* parameter) {
     bool etwasZuTun = a.wiedergabe != W_NICHTS || a.spruenge != 0 ||
                       a.lautAenderung != 0 || a.stummUmschalten;
     if (!etwasZuTun) {
+      // Nichts zu tun: Beim Abspielen ab und zu den aktuellen Titel holen.
+      if (sollSpielen && WiFi.status() == WL_CONNECTED &&
+          (int32_t)(millis() - naechsteTitelAbfrage) >= 0) {
+        holeTitel();
+        naechsteTitelAbfrage = millis() + TITEL_ABFRAGE_MS;
+      }
       vTaskDelay(pdMS_TO_TICKS(20));                // kurz schlafen, dann wieder schauen
       continue;
     }
@@ -545,6 +588,13 @@ void spotifyTask(void* parameter) {
         if (spiele(a.uri)) {
           gestartetePlatteNr = a.platteNr;
           zufallAus();
+          // Aktuelle Lautstärke holen, damit das Display sie gleich zeigt.
+          int echt = leseLautstaerke();
+          if (echt >= 0) {
+            lautstaerke = echt;
+            anzeigeLautstaerke = echt;
+            letzteLautAktion = millis();
+          }
         }
         break;
       case W_WEITER:
@@ -566,6 +616,12 @@ void spotifyTask(void* parameter) {
     // Springen startet auf manchen Geräten die Wiedergabe. Liegt der Tonarm
     // oben, schicken wir deshalb gleich wieder Pause hinterher.
     if (gesprungen && !sollSpielen) pausiere();
+    // Nach Start, Weiter oder Sprung den neuen Titel in einer Sekunde abfragen.
+    // Der Echo braucht einen Moment, bis Spotify den Wechsel meldet.
+    if (a.wiedergabe == W_START || a.wiedergabe == W_WEITER || gesprungen) {
+      naechsteTitelAbfrage = millis() + 1000;
+      if (gesprungen && !sollSpielen) holeTitel();   // in der Pause sofort zeigen
+    }
 
     // --- 3. Lautstärke ---
     if (a.lautAenderung != 0 || a.stummUmschalten) {
@@ -583,6 +639,8 @@ void spotifyTask(void* parameter) {
       if (neu != lautstaerke && setzeLautstaerke(neu)) lautstaerke = neu;
       letzteLautAktion = millis();
       Serial.printf("Lautstärke jetzt %d %%\n", lautstaerke);
+      anzeigeLautstaerke = lautstaerke;
+      einblendungBis = millis() + EINBLENDUNG_MS;   // groß einblenden
     }
   }
 }
@@ -857,6 +915,7 @@ void pruefePlatte() {
       platteGelesen  = false;
       aktuelleUri    = "";
       Serial.println("Platte weg.");
+      setzeTitel("", "", "");
     } else if (!platteLiegtAuf) {
       platteGelesen = false;
     }
@@ -879,6 +938,213 @@ void aktualisiereWiedergabe() {
     }
   } else {
     auftragWiedergabe(W_PAUSE, "", platteNr);
+  }
+}
+
+// ===========================================================================
+// Teil 4b: Titelinfos und Display
+// ===========================================================================
+
+// Fragt bei Spotify ab, welcher Titel gerade läuft, und gibt ihn ans Display.
+void holeTitel() {
+  if (!tokenBereit()) return;
+  String antwort;
+  anfrageProtokoll = false;                       // alle 5 s wäre zu viel im Monitor
+  int status = apiAnfrage("GET", "/me/player/currently-playing", "", antwort);
+  if (status == 401 && erneuereToken()) {
+    status = apiAnfrage("GET", "/me/player/currently-playing", "", antwort);
+  }
+  anfrageProtokoll = true;
+  if (status != 200) return;                      // 204 = gerade läuft nichts
+
+  // Die Antwort ist groß. Mit dem Filter behält ArduinoJson nur die drei
+  // Felder, die wir brauchen. Das spart viel Speicher.
+  JsonDocument filter;
+  filter["item"]["name"] = true;
+  filter["item"]["album"]["name"] = true;
+  filter["item"]["artists"][0]["name"] = true;
+
+  JsonDocument doc;
+  DeserializationError fehler = deserializeJson(doc, antwort, DeserializationOption::Filter(filter));
+  if (fehler) {
+    Serial.printf("Titelinfo nicht lesbar: %s\n", fehler.c_str());
+    return;
+  }
+  const char* titel     = doc["item"]["name"] | "";
+  const char* interpret = doc["item"]["artists"][0]["name"] | "";
+  const char* album     = doc["item"]["album"]["name"] | "";
+
+  // Nur bei einem Wechsel im Monitor melden.
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  bool neu = (anzeigeTitel != titel);
+  xSemaphoreGive(anzeigeSperre);
+  if (neu && strlen(titel) > 0) Serial.printf("Läuft: %s - %s\n", interpret, titel);
+  setzeTitel(titel, interpret, album);
+}
+
+void setzeTitel(const String& titel, const String& interpret, const String& album) {
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  anzeigeTitel = titel;
+  anzeigeInterpret = interpret;
+  anzeigeAlbum = album;
+  xSemaphoreGive(anzeigeSperre);
+}
+
+void zeigeHinweis(const String& text) {
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  anzeigeHinweis = text;
+  xSemaphoreGive(anzeigeSperre);
+  hinweisBis = millis() + HINWEIS_MS;
+}
+
+// Spotify liefert Text als UTF-8. Die eingebaute Schrift des Displays kennt
+// stattdessen den alten Zeichensatz CP437. Wir übersetzen die gängigen
+// Sonderzeichen, alle anderen werden zu '?'.
+String fuerDisplay(const String& text) {
+  String r;
+  for (unsigned int i = 0; i < text.length(); i++) {
+    uint8_t c = (uint8_t)text[i];
+    if (c < 0x80) { r += (char)c; continue; }
+    if (c == 0xC3 && i + 1 < text.length()) {
+      uint8_t d = (uint8_t)text[++i];
+      uint8_t z = '?';
+      switch (d) {
+        case 0xA4: z = 0x84; break;   // ä
+        case 0xB6: z = 0x94; break;   // ö
+        case 0xBC: z = 0x81; break;   // ü
+        case 0x84: z = 0x8E; break;   // Ä
+        case 0x96: z = 0x99; break;   // Ö
+        case 0x9C: z = 0x9A; break;   // Ü
+        case 0x9F: z = 0xE1; break;   // ß
+        case 0xA9: z = 0x82; break;   // é
+        case 0xA8: z = 0x8A; break;   // è
+        case 0xA1: z = 0xA0; break;   // á
+        case 0xB1: z = 0xA4; break;   // ñ
+        case 0xA7: z = 0x87; break;   // ç
+      }
+      r += (char)z;
+      continue;
+    }
+    // anderes Sonderzeichen aus mehreren Byte: durch '?' ersetzen
+    r += '?';
+    while (i + 1 < text.length() && (((uint8_t)text[i + 1]) & 0xC0) == 0x80) i++;
+  }
+  return r;
+}
+
+// Schreibt eine Textzeile. Passt sie auf das Display, steht sie still.
+// Ist sie zu lang, läuft sie langsam von rechts nach links durch.
+void zeichneZeile(int16_t y, const String& text, uint32_t jetzt) {
+  int16_t breite = text.length() * 6;             // jedes Zeichen ist 6 Pixel breit
+  if (breite <= 128) {
+    display.setCursor(0, y);
+    display.print(text);
+    return;
+  }
+  String lauf = text + "     ";                   // Abstand vor der Wiederholung
+  int16_t gesamt = lauf.length() * 6;
+  // Erst 2 Sekunden stehen lassen, dann mit 25 Pixel pro Sekunde laufen.
+  uint32_t t = jetzt % (2000 + (uint32_t)gesamt * 40);
+  int16_t versatz = (t < 2000) ? 0 : (int16_t)((t - 2000) / 40);
+  display.setCursor(-versatz, y);
+  display.print(lauf);
+  display.print(lauf);                            // zweite Kopie schließt die Lücke
+}
+
+// Untere Zeile: Zustand links, Lautstärke rechts.
+void zeichneStatuszeile(const char* zustand) {
+  display.setCursor(0, 24);
+  display.print(zustand);
+  int laut = anzeigeLautstaerke;
+  char text[12];
+  if (laut < 0)       snprintf(text, sizeof(text), "Vol --");
+  else if (laut == 0) snprintf(text, sizeof(text), "Stumm");
+  else                snprintf(text, sizeof(text), "Vol %d%%", laut);
+  display.setCursor(128 - strlen(text) * 6, 24);  // rechtsbündig
+  display.print(text);
+}
+
+void zeichneAnzeige() {
+  uint32_t jetzt = millis();
+
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  String titel     = fuerDisplay(anzeigeTitel);
+  String interpret = fuerDisplay(anzeigeInterpret);
+  String album     = fuerDisplay(anzeigeAlbum);
+  String hinweis   = fuerDisplay(anzeigeHinweis);
+  xSemaphoreGive(anzeigeSperre);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // 1. Lautstärke gerade geändert: groß einblenden mit Balken
+  if ((int32_t)(einblendungBis - jetzt) > 0) {
+    int laut = anzeigeLautstaerke;
+    display.setTextSize(2);                       // doppelt so groß: 12 x 16 Pixel
+    display.setCursor(0, 0);
+    if (laut == 0) display.print("Stumm");
+    else           display.printf("Laut %d%%", laut);
+    display.drawRect(0, 22, 128, 10, SSD1306_WHITE);
+    if (laut > 0) display.fillRect(2, 24, (124 * laut) / 100, 6, SSD1306_WHITE);
+    display.display();
+    return;
+  }
+
+  // 2. Hinweis, z. B. "Echo nicht erreichbar"
+  if ((int32_t)(hinweisBis - jetzt) > 0 && hinweis.length() > 0) {
+    display.setCursor(0, 0);
+    display.print("Hinweis");
+    zeichneZeile(12, hinweis, jetzt);
+    display.display();
+    return;
+  }
+
+  // 3. Normale Anzeige je nach Zustand
+  bool gestartet = platteLiegtAuf && gestartetePlatteNr == platteNr;
+  if (!platteLiegtAuf) {
+    display.setCursor(0, 4);
+    display.print("Platte auflegen");
+    zeichneStatuszeile("Bereit");
+  } else if (!gestartet && !armUnten) {
+    display.setCursor(0, 0);
+    display.print("Platte erkannt");
+    display.setCursor(0, 10);
+    display.print("Tonarm runter");
+    zeichneStatuszeile("");
+  } else if (titel.length() == 0) {
+    display.setCursor(0, 4);
+    display.print(armUnten ? "Starte..." : "Pause");
+    zeichneStatuszeile(armUnten ? ">" : "||");
+  } else {
+    zeichneZeile(0,  titel, jetzt);
+    zeichneZeile(8,  interpret, jetzt);
+    zeichneZeile(16, album, jetzt);
+    // Lauftext kann in die Statuszeile ragen: Zeile 24 vorher frei machen
+    display.fillRect(0, 24, 128, 8, SSD1306_BLACK);
+    zeichneStatuszeile(armUnten ? "> Spielt" : "|| Pause");
+  }
+  display.display();
+}
+
+// Einfache Startanzeige, solange die Tasks noch nicht laufen.
+void zeigeStart(const char* zeile1, const char* zeile2) {
+  if (!displayOk) return;
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print(zeile1);
+  display.setCursor(0, 12);
+  display.print(zeile2);
+  display.display();
+}
+
+// Eigene Aufgabe: zeichnet das Display etwa 20-mal pro Sekunde neu.
+void anzeigeTask(void* parameter) {
+  for (;;) {
+    zeichneAnzeige();
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
@@ -920,6 +1186,19 @@ void setup() {
   delay(2000);   // Zeit für den Seriellen Monitor, sonst gehen die ersten Zeilen verloren
   Serial.println();
   Serial.println("=== RFID-Plattenspieler, Version 2 ===");
+
+  // --- Display ---
+  anzeigeSperre = xSemaphoreCreateMutex();
+  Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  Wire.setClock(400000);                          // schneller I2C, flüssigere Anzeige
+  displayOk = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADRESSE);
+  if (displayOk) {
+    display.cp437(true);                          // richtige Zeichentabelle für Umlaute
+    display.setTextWrap(false);                   // lange Zeilen abschneiden statt umbrechen
+    zeigeStart("Plattenspieler", "Starte...");
+  } else {
+    Serial.println("Display nicht gefunden. Verkabelung prüfen (SDA 21, SCL 4).");
+  }
 
   // --- Motor ---
   for (uint8_t i = 0; i < 4; i++) {
@@ -964,9 +1243,13 @@ void setup() {
   }
 
   // --- WLAN und erster Token ---
+  zeigeStart("Verbinde WLAN...", WIFI_SSID);
   verbindeWlan();
+  zeigeStart("WLAN ok", "Anmeldung Spotify...");
   if (!erneuereToken()) {
     Serial.println("Spotify-Anmeldung fehlgeschlagen. Stimmen Client-ID und Refresh Token?");
+    zeigeStart("Spotify-Anmeldung", "fehlgeschlagen");
+    delay(3000);
   }
 
   // --- Aufgaben starten ---
@@ -975,6 +1258,11 @@ void setup() {
   // Verschlüsselung. Motor auf Kern 1 mit höherer Priorität als loop().
   xTaskCreatePinnedToCore(spotifyTask, "spotify", 12288, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(motorTask,   "motor",   2048,  NULL, 2, NULL, 1);
+  // Display auf Kern 1 mit derselben Priorität wie loop(). Größerer Stapel
+  // wegen der Texte.
+  if (displayOk) {
+    xTaskCreatePinnedToCore(anzeigeTask, "anzeige", 4096, NULL, 1, NULL, 1);
+  }
 
   uint8_t v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
   Serial.printf("RC522-Version jetzt: 0x%02X%s\n", v,
