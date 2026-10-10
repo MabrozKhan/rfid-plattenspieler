@@ -86,7 +86,7 @@ const uint8_t PIN_ZURUECK = 33;
 const uint8_t PIN_TONARM  = 16;
 // true: Schalter gedrückt heißt Tonarm liegt auf der Platte.
 // Ist es bei deiner Mechanik umgekehrt, auf false stellen.
-const bool TONARM_GEDRUECKT_HEISST_UNTEN = true;
+const bool TONARM_GEDRUECKT_HEISST_UNTEN = false;
 const uint32_t TASTER_ENTPRELL_MS = 50;
 
 // --- Platte ---
@@ -100,6 +100,9 @@ const uint16_t NUTZDATEN_LEN = 144;
 
 // --- Spotify ---
 const char*    API_HOST = "api.spotify.com";
+// Findet Spotify den Echo unter der gespeicherten ID nicht, suchen wir ihn
+// in der Geräteliste über einen Teil seines Namens (Groß/klein egal).
+const char*    GERAET_NAME_TEIL = "echo";
 // Nach so langer Funkstille bauen wir die Verbindung lieber frisch auf, weil
 // Spotify unbenutzte Verbindungen irgendwann von sich aus schließt.
 const uint32_t VERBINDUNG_LEERLAUF_MS = 20000;
@@ -174,6 +177,7 @@ uint32_t         tokenGueltigBis = 0;
 int              lautstaerke     = -1;   // -1 = noch unbekannt
 int              lautVorStumm    = 30;
 uint32_t         letzteLautAktion = 0;
+String           geraetId = SPOTIFY_DEVICE_ID;   // kann sich zur Laufzeit ändern
 
 // ===========================================================================
 // Teil 1: WLAN
@@ -407,6 +411,46 @@ int apiAnfrage(const char* methode, const String& pfad,
   return status;
 }
 
+// Fragt die Geräteliste bei Spotify ab, gibt sie im Monitor aus und sucht den
+// Echo über seinen Namen. true, wenn er gefunden wurde (geraetId ist dann aktuell).
+bool findeGeraet() {
+  String antwort;
+  int status = apiAnfrage("GET", "/me/player/devices", "", antwort);
+  if (status != 200) return false;
+
+  Serial.println("Geräte, die Spotify gerade kennt:");
+  bool gefunden = false;
+  int pos = 0;
+  // Jedes Gerät ist ein Objekt in geschweiften Klammern ohne weitere
+  // Verschachtelung. Wir gehen sie der Reihe nach durch.
+  for (;;) {
+    int auf = antwort.indexOf('{', pos + 1);
+    if (auf < 0) break;
+    int zu = antwort.indexOf('}', auf);
+    if (zu < 0) break;
+    String objekt = antwort.substring(auf, zu + 1);
+    pos = zu;
+    String id   = jsonWert(objekt, "id");
+    String name = jsonWert(objekt, "name");
+    if (id.length() == 0) continue;
+    Serial.printf("  %s  (%s)\n", name.c_str(), id.c_str());
+    String nameKlein = name;
+    nameKlein.toLowerCase();
+    if (!gefunden && nameKlein.indexOf(GERAET_NAME_TEIL) >= 0) {
+      gefunden = true;
+      if (id != geraetId) {
+        Serial.println("  -> neue ID für den Echo übernommen");
+        geraetId = id;
+      }
+    }
+  }
+  if (!gefunden) {
+    Serial.println("  Echo nicht in der Liste. Er ist für Spotify gerade nicht erreichbar.");
+    Serial.println("  Tipp: einmal \"Alexa, spiele Spotify\" sagen, dann erneut versuchen.");
+  }
+  return gefunden;
+}
+
 // Schickt einen Befehl an den Spotify-Player.
 //   methode    "PUT" oder "POST"
 //   befehl     play, pause, volume, next, previous, shuffle
@@ -414,18 +458,24 @@ int apiAnfrage(const char* methode, const String& pfad,
 bool playerBefehl(const char* methode, const char* befehl,
                   const String& parameter, const String& koerper) {
   if (!tokenBereit()) return false;
-  String pfad = String("/me/player/") + befehl + "?device_id=" + SPOTIFY_DEVICE_ID + parameter;
+  String pfad = String("/me/player/") + befehl + "?device_id=" + geraetId + parameter;
   String antwort;
   int status = apiAnfrage(methode, pfad, koerper, antwort);
   if (status == 401 && erneuereToken()) {          // Token abgelaufen
     status = apiAnfrage(methode, pfad, koerper, antwort);
   }
+  if (status == 404) {
+    // Gerät unter dieser ID nicht gefunden. In der Geräteliste nachsehen,
+    // ob der Echo eine neue ID hat, und dann einmal neu versuchen.
+    Serial.println("Spotify kennt das Gerät unter dieser ID gerade nicht, suche den Echo...");
+    if (findeGeraet()) {
+      pfad = String("/me/player/") + befehl + "?device_id=" + geraetId + parameter;
+      status = apiAnfrage(methode, pfad, koerper, antwort);
+    }
+  }
   if (status == 200 || status == 202 || status == 204) return true;
 
-  Serial.printf("Spotify-Fehler bei %s (%d): %s\n", befehl, status, antwort.c_str());
-  if (status == 404) {
-    Serial.println("Hinweis: Gerät nicht gefunden. Ist der Echo an und die Geräte-ID richtig?");
-  }
+  Serial.printf("Spotify-Fehler bei %s (%d)\n", befehl, status);
   return false;
 }
 
@@ -779,11 +829,21 @@ void pruefePlatte() {
     if (!platteGelesen) {
       bool leseFehler;
       String uri = leseUriVomSticker(leseFehler);
+      if (leseFehler) {
+        // Sticker ist im Feld, aber Auslesen hat nicht geklappt. Höchstens
+        // jede Sekunde melden, damit der Monitor nicht vollläuft.
+        static uint32_t letzteMeldung = 0;
+        if (millis() - letzteMeldung > 1000) {
+          letzteMeldung = millis();
+          Serial.println("Sticker erkannt, Auslesen fehlgeschlagen. Neuer Versuch...");
+        }
+      }
       if (!leseFehler) {                          // bei Lesefehler: nächster Durchlauf versucht es neu
         platteGelesen  = true;
         platteLiegtAuf = true;
         platteNr++;                               // neues Auflegen
         aktuelleUri = uri;
+        Serial.println("Platte erkannt.");
         if (uri.length() == 0) Serial.println("Platte ohne Spotify-Link.");
         else if (!armUnten)    Serial.println("Platte erkannt. Tonarm auflegen zum Starten.");
       }
@@ -857,7 +917,7 @@ void motorTask(void* parameter) {
 // ===========================================================================
 void setup() {
   Serial.begin(115200);
-  delay(500);
+  delay(2000);   // Zeit für den Seriellen Monitor, sonst gehen die ersten Zeilen verloren
   Serial.println();
   Serial.println("=== RFID-Plattenspieler, Version 2 ===");
 
@@ -916,6 +976,9 @@ void setup() {
   xTaskCreatePinnedToCore(spotifyTask, "spotify", 12288, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(motorTask,   "motor",   2048,  NULL, 2, NULL, 1);
 
+  uint8_t v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  Serial.printf("RC522-Version jetzt: 0x%02X%s\n", v,
+                (v == 0x00 || v == 0xFF) ? "  (FEHLER: Leser antwortet nicht)" : "  (ok)");
   Serial.println("Bereit. Platte auflegen und Tonarm runter.");
 }
 
