@@ -113,6 +113,9 @@ const char*    GERAET_NAME_TEIL = "echo";
 // Spotify unbenutzte Verbindungen irgendwann von sich aus schließt.
 const uint32_t VERBINDUNG_LEERLAUF_MS = 20000;
 const uint32_t ANTWORT_FRIST_MS       = 8000;    // so lange auf eine Antwort warten
+// Selbstheilung: Nach so vielen Anfragen ohne Verbindung hintereinander wird
+// das WLAN neu verbunden, nach doppelt so vielen startet der ESP32 neu.
+const uint8_t  FEHLER_BIS_WLAN_NEU    = 2;
 // Wurde die Lautstärke so lange nicht verändert, holen wir vor der nächsten
 // Änderung den echten Wert von Spotify. Er könnte per Sprache geändert worden sein.
 const uint32_t LAUTSTAERKE_NEU_LESEN_MS = 10000;
@@ -195,6 +198,7 @@ int              lautVorStumm    = 30;
 uint32_t         letzteLautAktion = 0;
 String           geraetId = SPOTIFY_DEVICE_ID;   // kann sich zur Laufzeit ändern
 uint32_t         naechsteTitelAbfrage = 0;
+uint8_t          verbindungsFehlerInFolge = 0;
 bool             anfrageProtokoll = true;         // false = Anfrage nicht im Monitor zeigen
 
 // --- Display ---
@@ -353,7 +357,18 @@ int apiAnfrageEinmal(const char* methode, const String& pfad,
 
   if (!apiClient.connected()) {
     apiClient.stop();
-    if (!apiClient.connect(API_HOST, 443, 5000)) return -1;   // kein Verbindungsaufbau
+    if (!apiClient.connect(API_HOST, 443, 5000)) {
+      // Verbindung kam nicht zustande. Für die Fehlersuche ausgeben, woran es
+      // liegen könnte: Namensauflösung (DNS), Arbeitsspeicher oder Funksignal.
+      IPAddress ip;
+      bool dnsOk = WiFi.hostByName(API_HOST, ip);
+      Serial.printf("  Kein Verbindungsaufbau. DNS %s (%s), freier Speicher %u, "
+                    "größter Block %u, WLAN %d dBm, Status %d\n",
+                    dnsOk ? "ok" : "FEHLER", ip.toString().c_str(),
+                    (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                    (int)WiFi.RSSI(), (int)WiFi.status());
+      return -1;
+    }
   }
   while (apiClient.available() > 0) apiClient.read();          // Reste verwerfen
 
@@ -401,6 +416,7 @@ int apiAnfrageEinmal(const char* methode, const String& pfad,
   if (status == 204 || status == 304) {
     // kein Inhalt
   } else if (chunked) {
+    antwort.reserve(4096);                        // weniger Umkopieren, weniger Zerstückelung
     // Inhalt kommt in Blöcken: Größe (hex), Zeilenende, Daten, Zeilenende.
     // Ein Block der Größe 0 beendet die Antwort.
     for (;;) {
@@ -437,6 +453,36 @@ int apiAnfrage(const char* methode, const String& pfad,
     apiClient.stop();
     status = apiAnfrageEinmal(methode, pfad, koerper, antwort);
   }
+
+  // --- Selbstheilung bei dauerhaften Verbindungsproblemen ---
+  if (status < 0) {
+    verbindungsFehlerInFolge++;
+    zeigeHinweis("Keine Verbindung zu Spotify");
+    if (verbindungsFehlerInFolge >= 2 * FEHLER_BIS_WLAN_NEU) {
+      // Auch das neue WLAN hat nicht geholfen: kompletter Neustart.
+      Serial.println("Verbindung bleibt weg. Starte den ESP32 neu...");
+      zeigeHinweis("Neustart...");
+      delay(1000);
+      ESP.restart();
+    } else if (verbindungsFehlerInFolge >= FEHLER_BIS_WLAN_NEU) {
+      // WLAN trennen und neu verbinden. Das behebt hängende Namensauflösung
+      // und Verbindungen, die nach langer Laufzeit nicht mehr zustande kommen.
+      Serial.println("Mehrere Verbindungsfehler. Verbinde WLAN neu...");
+      apiClient.stop();
+      WiFi.disconnect();
+      delay(500);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      uint32_t warteBis = millis() + 15000;
+      while (WiFi.status() != WL_CONNECTED && (int32_t)(warteBis - millis()) > 0) delay(250);
+      Serial.printf("WLAN %s\n", WiFi.status() == WL_CONNECTED ? "wieder verbunden" : "weiterhin weg");
+      // Einmal neu versuchen
+      status = apiAnfrageEinmal(methode, pfad, koerper, antwort);
+      if (status >= 0) verbindungsFehlerInFolge = 0;
+    }
+  } else {
+    verbindungsFehlerInFolge = 0;
+  }
+
   // Für die Ausgabe nur den Teil vor dem '?' zeigen, die Geräte-ID ist lang.
   int frage = pfad.indexOf('?');
   String kurz = (frage >= 0) ? pfad.substring(0, frage) : pfad;
