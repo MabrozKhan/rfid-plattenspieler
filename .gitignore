@@ -36,3 +36,6 @@ desktop.ini
 
 # Spotify-Testskript
 spotify_config.json
+
+# Heruntergeladene Bauteil-Modelle (fremde Lizenzen, nicht weitergeben)
+cad/bauteile/
