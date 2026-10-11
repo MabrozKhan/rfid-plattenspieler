@@ -1034,34 +1034,27 @@ String fuerDisplay(const String& text) {
 
 // Schreibt eine Textzeile. Passt sie auf das Display, steht sie still.
 // Ist sie zu lang, läuft sie langsam von rechts nach links durch.
-void zeichneZeile(int16_t y, const String& text, uint32_t jetzt) {
-  int16_t breite = text.length() * 6;             // jedes Zeichen ist 6 Pixel breit
+//   groesse 1: Zeichen 6 x 8 Pixel, 21 Zeichen pro Zeile
+//   groesse 2: Zeichen 12 x 16 Pixel, 10 Zeichen pro Zeile
+void zeichneZeile(int16_t y, const String& text, uint32_t jetzt, uint8_t groesse) {
+  display.setTextSize(groesse);
+  int16_t zeichenBreite = 6 * groesse;
+  int16_t breite = text.length() * zeichenBreite;
   if (breite <= 128) {
     display.setCursor(0, y);
     display.print(text);
+    display.setTextSize(1);
     return;
   }
-  String lauf = text + "     ";                   // Abstand vor der Wiederholung
-  int16_t gesamt = lauf.length() * 6;
+  String lauf = text + "    ";                    // Abstand vor der Wiederholung
+  int16_t gesamt = lauf.length() * zeichenBreite;
   // Erst 2 Sekunden stehen lassen, dann mit 25 Pixel pro Sekunde laufen.
   uint32_t t = jetzt % (2000 + (uint32_t)gesamt * 40);
   int16_t versatz = (t < 2000) ? 0 : (int16_t)((t - 2000) / 40);
   display.setCursor(-versatz, y);
   display.print(lauf);
   display.print(lauf);                            // zweite Kopie schließt die Lücke
-}
-
-// Untere Zeile: Zustand links, Lautstärke rechts.
-void zeichneStatuszeile(const char* zustand) {
-  display.setCursor(0, 24);
-  display.print(zustand);
-  int laut = anzeigeLautstaerke;
-  char text[12];
-  if (laut < 0)       snprintf(text, sizeof(text), "Vol --");
-  else if (laut == 0) snprintf(text, sizeof(text), "Stumm");
-  else                snprintf(text, sizeof(text), "Vol %d%%", laut);
-  display.setCursor(128 - strlen(text) * 6, 24);  // rechtsbündig
-  display.print(text);
+  display.setTextSize(1);
 }
 
 void zeichneAnzeige() {
@@ -1095,34 +1088,33 @@ void zeichneAnzeige() {
   if ((int32_t)(hinweisBis - jetzt) > 0 && hinweis.length() > 0) {
     display.setCursor(0, 0);
     display.print("Hinweis");
-    zeichneZeile(12, hinweis, jetzt);
+    zeichneZeile(12, hinweis, jetzt, 1);
     display.display();
     return;
   }
 
-  // 3. Normale Anzeige je nach Zustand
+  // 3. Normale Anzeige je nach Zustand, alles in großer Schrift außer
+  //    Album und Interpret.
   bool gestartet = platteLiegtAuf && gestartetePlatteNr == platteNr;
   if (!platteLiegtAuf) {
-    display.setCursor(0, 4);
-    display.print("Platte auflegen");
-    zeichneStatuszeile("Bereit");
+    zeichneZeile(0,  "Platte", jetzt, 2);
+    zeichneZeile(16, "auflegen", jetzt, 2);
   } else if (!gestartet && !armUnten) {
-    display.setCursor(0, 0);
-    display.print("Platte erkannt");
-    display.setCursor(0, 10);
-    display.print("Tonarm runter");
-    zeichneStatuszeile("");
+    zeichneZeile(0,  "Tonarm", jetzt, 2);
+    zeichneZeile(16, "runter", jetzt, 2);
   } else if (titel.length() == 0) {
-    display.setCursor(0, 4);
-    display.print(armUnten ? "Starte..." : "Pause");
-    zeichneStatuszeile(armUnten ? ">" : "||");
+    zeichneZeile(0, armUnten ? "Starte..." : "Pause", jetzt, 2);
   } else {
-    zeichneZeile(0,  titel, jetzt);
-    zeichneZeile(8,  interpret, jetzt);
-    zeichneZeile(16, album, jetzt);
-    // Lauftext kann in die Statuszeile ragen: Zeile 24 vorher frei machen
-    display.fillRect(0, 24, 128, 8, SSD1306_BLACK);
-    zeichneStatuszeile(armUnten ? "> Spielt" : "|| Pause");
+    // Oben der Titel groß (16 Pixel hoch)
+    zeichneZeile(0, titel, jetzt, 2);
+    if (anzeigeLautstaerke == 0) {
+      // Stumm: statt Album und Interpret groß "Stumm"
+      zeichneZeile(16, "Stumm", jetzt, 2);
+    } else {
+      // Darunter Album und Interpret klein (je 8 Pixel hoch)
+      zeichneZeile(16, album, jetzt, 1);
+      zeichneZeile(24, interpret, jetzt, 1);
+    }
   }
   display.display();
 }
