@@ -34,6 +34,7 @@ Repository eingerichtet, als Nächstes Phase 1.
 | `fotos/` | Bilder vom Aufbau |
 
 Der ausführliche Plan steht in [docs/projektplan.md](docs/projektplan.md).
+Wie alles verkabelt ist, steht mit Schaltplan in [docs/verkabelung.md](docs/verkabelung.md).
 
 ## Zugangsdaten
 
