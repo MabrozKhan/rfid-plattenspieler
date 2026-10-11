@@ -521,8 +521,9 @@ bool findeGeraet() {
     if (!gefunden && nameKlein.indexOf(GERAET_NAME_TEIL) >= 0) {
       gefunden = true;
       if (id != geraetId) {
-        Serial.println("  -> neue ID für den Echo übernommen");
+        Serial.println("  -> neue ID für den Echo übernommen und gespeichert");
         geraetId = id;
+        speicher.putString("geraet", geraetId);   // gilt auch nach einem Neustart
       }
     }
   }
@@ -1279,6 +1280,16 @@ void setup() {
   } else {
     refreshToken = speicher.getString("refresh", SPOTIFY_REFRESH_TOKEN);
   }
+
+  // --- Geräte-ID des Echo ---
+  // Wurde der Echo schon einmal automatisch gefunden, gilt die gespeicherte ID.
+  // Sonst die aus secrets.h. Trägst du in secrets.h eine neue ID ein, wird die
+  // gespeicherte verworfen (gleicher Trick wie beim Refresh Token).
+  if (speicher.getString("geraetStart", "") != SPOTIFY_DEVICE_ID) {
+    speicher.putString("geraetStart", SPOTIFY_DEVICE_ID);
+    speicher.remove("geraet");
+  }
+  geraetId = speicher.getString("geraet", SPOTIFY_DEVICE_ID);
 
   // --- WLAN und erster Token ---
   zeigeStart("Verbinde WLAN...", WIFI_SSID);
