@@ -1,5 +1,5 @@
 /*
-  RFID-Plattenspieler, Version 2
+  RFID-Plattenspieler, Version 2.1
 
   Bedienung
     Platte auflegen            Link wird gelesen, noch keine Musik
@@ -122,6 +122,14 @@ const uint32_t LAUTSTAERKE_NEU_LESEN_MS = 10000;
 // So oft wird beim Abspielen nachgefragt, welcher Titel gerade läuft.
 const uint32_t TITEL_ABFRAGE_MS = 5000;
 
+// Nach dem Start prüfen wir, ob der Echo wirklich spielt. Spotify nimmt den
+// Befehl manchmal an, obwohl der Echo eingeschlafen ist und nichts passiert.
+const uint32_t START_PRUEF_MS       = 7000;    // so lange auf den Echo warten
+const uint8_t  START_RUNDEN         = 3;       // automatische neue Anläufe
+const uint32_t START_RUNDE_PAUSE_MS = 10000;   // Pause zwischen zwei Anläufen
+// Wächter: Hängt die Spotify-Aufgabe so lange fest, startet der ESP32 neu.
+const uint32_t WAECHTER_MS          = 120000;
+
 // --- Display ---
 // GPIO 22 ist schon vom RC522 belegt, deshalb SCL auf GPIO 4.
 const uint8_t  PIN_OLED_SDA  = 21;
@@ -164,6 +172,8 @@ volatile bool     sollSpielen       = false;
 volatile bool     motorSollDrehen   = false;
 // Von spotifyTask() geschrieben: Für welches Auflegen läuft die Platte schon?
 volatile uint32_t gestartetePlatteNr = 0;
+// Von spotifyTask() geschrieben: wann sie sich zuletzt gemeldet hat (Wächter)
+volatile uint32_t spotifyLebtMs = 0;
 
 // --- Nur von loop() benutzt ---
 MFRC522  rfid(PIN_SS, PIN_RST);
@@ -198,6 +208,11 @@ int              lautVorStumm    = 30;
 uint32_t         letzteLautAktion = 0;
 String           geraetId = SPOTIFY_DEVICE_ID;   // kann sich zur Laufzeit ändern
 uint32_t         naechsteTitelAbfrage = 0;
+// Ein Start, der nicht geklappt hat, wird später automatisch wiederholt.
+String           offenerStartUri;
+uint32_t         offenerStartNr   = 0;
+uint8_t          offenerStartRunde = 0;     // 0 = nichts offen
+uint32_t         naechsterStartVersuch = 0;
 uint8_t          verbindungsFehlerInFolge = 0;
 bool             anfrageProtokoll = true;         // false = Anfrage nicht im Monitor zeigen
 
@@ -212,6 +227,8 @@ String           anzeigeTitel;
 String           anzeigeInterpret;
 String           anzeigeAlbum;
 String           anzeigeHinweis;
+String           anzeigeStatus;          // ersetzt "Starte...", z. B. "Wecke Echo..."
+String           anzeigeStatusKlein;     // kleine Zeile darunter
 volatile uint32_t hinweisBis      = 0;
 volatile int     anzeigeLautstaerke = -1;
 volatile uint32_t einblendungBis  = 0;
@@ -278,10 +295,19 @@ bool erneuereToken() {
   String antwort = (status > 0 && status != 204) ? http.getString() : "";
   http.end();
 
-  if (status != 200) {
-    Serial.printf("Token erneuern fehlgeschlagen (%d): %s\n", status, antwort.c_str());
+  if (status < 0) {
+    // accounts.spotify.com war gar nicht erreichbar. Zählt wie jeder andere
+    // Verbindungsfehler, damit WLAN-Neustart und Neustart greifen.
+    Serial.printf("Token erneuern: keine Verbindung (%d)\n", status);
+    verbindungsFehler();
     return false;
   }
+  if (status != 200) {
+    Serial.printf("Token erneuern fehlgeschlagen (%d): %s\n", status, antwort.c_str());
+    zeigeHinweis("Spotify-Anmeldung fehlgeschlagen");
+    return false;
+  }
+  verbindungsFehlerInFolge = 0;
 
   accessToken = jsonWert(antwort, "access_token");
   long sekunden = jsonWert(antwort, "expires_in").toInt();
@@ -444,9 +470,39 @@ int apiAnfrageEinmal(const char* methode, const String& pfad,
 }
 
 // Anfrage mit Zeitmessung und einem zweiten Versuch bei Verbindungsfehlern.
+// Zählt einen Verbindungsfehler und greift ein, wenn sie sich häufen.
+// true, wenn das WLAN gerade neu verbunden wurde, dann lohnt ein neuer Versuch.
+bool verbindungsFehler() {
+  verbindungsFehlerInFolge++;
+  zeigeHinweis("Keine Verbindung zu Spotify");
+  if (verbindungsFehlerInFolge >= 2 * FEHLER_BIS_WLAN_NEU) {
+    // Auch das neue WLAN hat nicht geholfen: kompletter Neustart.
+    Serial.println("Verbindung bleibt weg. Starte den ESP32 neu...");
+    zeigeHinweis("Neustart...");
+    delay(1000);
+    ESP.restart();
+  }
+  if (verbindungsFehlerInFolge >= FEHLER_BIS_WLAN_NEU) {
+    // WLAN trennen und neu verbinden. Das behebt hängende Namensauflösung
+    // und Verbindungen, die nach langer Laufzeit nicht mehr zustande kommen.
+    Serial.println("Mehrere Verbindungsfehler. Verbinde WLAN neu...");
+    apiClient.stop();
+    WiFi.disconnect();
+    delay(500);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    uint32_t warteBis = millis() + 15000;
+    while (WiFi.status() != WL_CONNECTED && (int32_t)(warteBis - millis()) > 0) delay(250);
+    bool da = WiFi.status() == WL_CONNECTED;
+    Serial.printf("WLAN %s\n", da ? "wieder verbunden" : "weiterhin weg");
+    return da;
+  }
+  return false;
+}
+
 int apiAnfrage(const char* methode, const String& pfad,
                const String& koerper, String& antwort) {
   uint32_t start = millis();
+  spotifyLebtMs = millis();                       // für den Wächter in loop()
   int status = apiAnfrageEinmal(methode, pfad, koerper, antwort);
   if (status < 0) {
     Serial.printf("  Verbindungsfehler %d, neuer Versuch mit frischer Verbindung\n", status);
@@ -456,27 +512,8 @@ int apiAnfrage(const char* methode, const String& pfad,
 
   // --- Selbstheilung bei dauerhaften Verbindungsproblemen ---
   if (status < 0) {
-    verbindungsFehlerInFolge++;
-    zeigeHinweis("Keine Verbindung zu Spotify");
-    if (verbindungsFehlerInFolge >= 2 * FEHLER_BIS_WLAN_NEU) {
-      // Auch das neue WLAN hat nicht geholfen: kompletter Neustart.
-      Serial.println("Verbindung bleibt weg. Starte den ESP32 neu...");
-      zeigeHinweis("Neustart...");
-      delay(1000);
-      ESP.restart();
-    } else if (verbindungsFehlerInFolge >= FEHLER_BIS_WLAN_NEU) {
-      // WLAN trennen und neu verbinden. Das behebt hängende Namensauflösung
-      // und Verbindungen, die nach langer Laufzeit nicht mehr zustande kommen.
-      Serial.println("Mehrere Verbindungsfehler. Verbinde WLAN neu...");
-      apiClient.stop();
-      WiFi.disconnect();
-      delay(500);
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-      uint32_t warteBis = millis() + 15000;
-      while (WiFi.status() != WL_CONNECTED && (int32_t)(warteBis - millis()) > 0) delay(250);
-      Serial.printf("WLAN %s\n", WiFi.status() == WL_CONNECTED ? "wieder verbunden" : "weiterhin weg");
-      // Einmal neu versuchen
-      status = apiAnfrageEinmal(methode, pfad, koerper, antwort);
+    if (verbindungsFehler()) {
+      status = apiAnfrageEinmal(methode, pfad, koerper, antwort);   // einmal neu versuchen
       if (status >= 0) verbindungsFehlerInFolge = 0;
     }
   } else {
@@ -489,6 +526,10 @@ int apiAnfrage(const char* methode, const String& pfad,
   if (anfrageProtokoll || status < 0 || status >= 300) {
     Serial.printf("  %s %s -> %d (%lu ms)\n", methode, kurz.c_str(), status,
                   (unsigned long)(millis() - start));
+  }
+  // Bei Fehlern sagt Spotify meist im Text, was los ist. Mit ausgeben.
+  if (status >= 300 && antwort.length() > 0) {
+    Serial.printf("    Spotify sagt: %s\n", antwort.substring(0, 200).c_str());
   }
   return status;
 }
@@ -597,6 +638,112 @@ int leseLautstaerke() {
   return wert.toInt();
 }
 
+// Holt die Wiedergabe auf den Echo. Das weckt ihn oft auf, wenn er für
+// Spotify eingeschlafen ist und Befehle stillschweigend ins Leere gehen.
+bool weckeEcho() {
+  if (!tokenBereit()) return false;
+  String antwort;
+  String koerper = "{\"device_ids\":[\"" + geraetId + "\"],\"play\":false}";
+  int status = apiAnfrage("PUT", "/me/player", koerper, antwort);
+  if (status == 401 && erneuereToken()) status = apiAnfrage("PUT", "/me/player", koerper, antwort);
+  return status == 200 || status == 202 || status == 204;
+}
+
+// Fragt Spotify, ob der Echo gerade wirklich spielt.
+// 1 = spielt, 0 = spielt nicht, -1 = Abfrage hat nicht geklappt
+int pruefeEchoSpielt() {
+  if (!tokenBereit()) return -1;
+  String antwort;
+  int status = apiAnfrage("GET", "/me/player", "", antwort);
+  if (status == 401 && erneuereToken()) status = apiAnfrage("GET", "/me/player", "", antwort);
+  if (status == 204) return 0;                      // gerade ist gar nichts aktiv
+  if (status != 200) return -1;
+
+  JsonDocument filter;
+  filter["is_playing"] = true;
+  filter["device"]["id"] = true;
+  filter["device"]["name"] = true;
+  JsonDocument doc;
+  if (deserializeJson(doc, antwort, DeserializationOption::Filter(filter))) return -1;
+
+  bool   spielt = doc["is_playing"] | false;
+  String id     = doc["device"]["id"] | "";
+  String name   = doc["device"]["name"] | "";
+  String klein  = name;
+  klein.toLowerCase();
+  bool aufEcho = (id == geraetId) || klein.indexOf(GERAET_NAME_TEIL) >= 0;
+  if (spielt && !aufEcho) {
+    Serial.printf("  Spotify spielt gerade auf \"%s\", nicht auf dem Echo.\n", name.c_str());
+  }
+  return (spielt && aufEcho) ? 1 : 0;
+}
+
+// Wartet bis zu START_PRUEF_MS darauf, dass der Echo loslegt.
+bool warteAufEcho() {
+  uint32_t ende = millis() + START_PRUEF_MS;
+  while ((int32_t)(ende - millis()) > 0) {
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    spotifyLebtMs = millis();
+    if (!sollSpielen) return false;                 // Tonarm inzwischen hoch
+    if (pruefeEchoSpielt() == 1) return true;
+  }
+  return false;
+}
+
+// Startet eine Platte und prüft, ob der Echo wirklich spielt. Wenn nicht,
+// wird er geweckt und notfalls in der Geräteliste neu gesucht.
+bool starteMitPruefung(const String& uri) {
+  for (uint8_t versuch = 1; versuch <= 3; versuch++) {
+    if (!sollSpielen) return false;
+    if (versuch == 2) {
+      Serial.println("Echo spielt nicht. Versuche ihn zu wecken...");
+      setzeStatus("Wecke Echo...", "");
+      weckeEcho();
+      vTaskDelay(pdMS_TO_TICKS(1500));
+    } else if (versuch == 3) {
+      Serial.println("Immer noch nichts. Suche den Echo in der Geräteliste...");
+      setzeStatus("Suche Echo...", "");
+      if (!findeGeraet()) {
+        // Steht er gar nicht in der Liste, kann Spotify ihn nicht erreichen.
+        setzeStatus("Echo offline", "Alexa, spiele Spotify");
+        return false;
+      }
+      weckeEcho();
+      vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+    if (spiele(uri)) {
+      zufallAus();
+      if (warteAufEcho()) return true;
+    }
+  }
+  setzeStatus("Echo hängt", "spielt nicht");
+  return false;
+}
+
+// Merkt sich einen fehlgeschlagenen Start für einen späteren neuen Anlauf.
+void startFehlgeschlagen(const String& uri, uint32_t nr) {
+  if (offenerStartNr != nr) offenerStartRunde = 0;  // neue Platte: neu zählen
+  offenerStartUri = uri;
+  offenerStartNr  = nr;
+  offenerStartRunde++;
+  if (offenerStartRunde <= START_RUNDEN) {
+    naechsterStartVersuch = millis() + START_RUNDE_PAUSE_MS;
+    Serial.printf("Start hat nicht geklappt. Neuer Anlauf %u von %u in %lu s.\n",
+                  (unsigned)offenerStartRunde, (unsigned)START_RUNDEN,
+                  (unsigned long)(START_RUNDE_PAUSE_MS / 1000));
+    xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+    String klein = anzeigeStatusKlein;
+    xSemaphoreGive(anzeigeSperre);
+    if (klein.length() == 0 || klein == "spielt nicht") {
+      setzeStatus(anzeigeStatusGross(), "neuer Versuch gleich");
+    }
+  } else {
+    offenerStartRunde = 0;                          // aufgeben
+    Serial.println("Start endgültig nicht geklappt. Tonarm hoch und wieder runter versucht es neu.");
+    setzeStatus(anzeigeStatusGross(), "Arm hoch und runter");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Die Spotify-Aufgabe: holt Aufträge ab und arbeitet sie nacheinander ab.
 // ---------------------------------------------------------------------------
@@ -604,6 +751,7 @@ void spotifyTask(void* parameter) {
   apiClient.setInsecure();     // Prototyp: Zertifikat wird nicht geprüft
 
   for (;;) {
+    spotifyLebtMs = millis();                       // Lebenszeichen für den Wächter
     // Aufträge abholen und die Liste leeren. Die Sperre sorgt dafür, dass
     // loop() nicht gleichzeitig hineinschreibt.
     xSemaphoreTake(auftragSperre, portMAX_DELAY);
@@ -613,9 +761,23 @@ void spotifyTask(void* parameter) {
 
     bool etwasZuTun = a.wiedergabe != W_NICHTS || a.spruenge != 0 ||
                       a.lautAenderung != 0 || a.stummUmschalten;
+    // Ein Start ist vorhin gescheitert: nach der Pause automatisch neu anlaufen,
+    // solange dieselbe Platte liegt und der Tonarm unten ist.
+    if (!etwasZuTun && offenerStartRunde > 0) {
+      if (!sollSpielen || offenerStartNr != platteNr || gestartetePlatteNr == platteNr) {
+        offenerStartRunde = 0;                      // hat sich erledigt
+      } else if ((int32_t)(millis() - naechsterStartVersuch) >= 0) {
+        a.wiedergabe = W_START;
+        a.uri        = offenerStartUri;
+        a.platteNr   = offenerStartNr;
+        etwasZuTun   = true;
+        Serial.printf("Neuer Anlauf %u von %u\n", (unsigned)offenerStartRunde, (unsigned)START_RUNDEN);
+      }
+    }
+
     if (!etwasZuTun) {
       // Nichts zu tun: Beim Abspielen ab und zu den aktuellen Titel holen.
-      if (sollSpielen && WiFi.status() == WL_CONNECTED &&
+      if (sollSpielen && gestartetePlatteNr == platteNr && WiFi.status() == WL_CONNECTED &&
           (int32_t)(millis() - naechsteTitelAbfrage) >= 0) {
         holeTitel();
         naechsteTitelAbfrage = millis() + TITEL_ABFRAGE_MS;
@@ -632,9 +794,11 @@ void spotifyTask(void* parameter) {
     switch (a.wiedergabe) {
       case W_START:
         Serial.printf("Spotify: starte von vorne %s\n", a.uri.c_str());
-        if (spiele(a.uri)) {
+        setzeStatus("Starte...", "");
+        if (starteMitPruefung(a.uri)) {
           gestartetePlatteNr = a.platteNr;
-          zufallAus();
+          offenerStartRunde = 0;
+          setzeStatus("", "");
           // Aktuelle Lautstärke holen, damit das Display sie gleich zeigt.
           int echt = leseLautstaerke();
           if (echt >= 0) {
@@ -642,11 +806,19 @@ void spotifyTask(void* parameter) {
             anzeigeLautstaerke = echt;
             letzteLautAktion = millis();
           }
+        } else if (sollSpielen) {
+          startFehlgeschlagen(a.uri, a.platteNr);
         }
         break;
       case W_WEITER:
         Serial.println("Spotify: weiter");
-        weiter();
+        if (!weiter()) {
+          // Nach langer Pause ist der Echo manchmal eingeschlafen.
+          Serial.println("Weiter hat nicht geklappt. Versuche den Echo zu wecken...");
+          weckeEcho();
+          vTaskDelay(pdMS_TO_TICKS(1500));
+          if (!weiter()) zeigeHinweis("Echo antwortet nicht");
+        }
         break;
       case W_PAUSE:
         Serial.println("Spotify: Pause");
@@ -1037,6 +1209,20 @@ void setzeTitel(const String& titel, const String& interpret, const String& albu
   xSemaphoreGive(anzeigeSperre);
 }
 
+void setzeStatus(const String& gross, const String& klein) {
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  anzeigeStatus = gross;
+  anzeigeStatusKlein = klein;
+  xSemaphoreGive(anzeigeSperre);
+}
+
+String anzeigeStatusGross() {
+  xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
+  String t = anzeigeStatus;
+  xSemaphoreGive(anzeigeSperre);
+  return t;
+}
+
 void zeigeHinweis(const String& text) {
   xSemaphoreTake(anzeigeSperre, portMAX_DELAY);
   anzeigeHinweis = text;
@@ -1112,6 +1298,8 @@ void zeichneAnzeige() {
   String interpret = fuerDisplay(anzeigeInterpret);
   String album     = fuerDisplay(anzeigeAlbum);
   String hinweis   = fuerDisplay(anzeigeHinweis);
+  String status    = fuerDisplay(anzeigeStatus);
+  String statusKl  = fuerDisplay(anzeigeStatusKlein);
   xSemaphoreGive(anzeigeSperre);
 
   display.clearDisplay();
@@ -1150,7 +1338,13 @@ void zeichneAnzeige() {
     zeichneZeile(0,  "Tonarm", jetzt, 2);
     zeichneZeile(16, "runter", jetzt, 2);
   } else if (titel.length() == 0) {
-    zeichneZeile(0, armUnten ? "Starte..." : "Pause", jetzt, 2);
+    if (!armUnten) {
+      zeichneZeile(0, "Pause", jetzt, 2);
+    } else {
+      // Was beim Starten gerade passiert, z. B. "Wecke Echo..." oder ein Fehler
+      zeichneZeile(0, status.length() > 0 ? status : String("Starte..."), jetzt, 2);
+      if (statusKl.length() > 0) zeichneZeile(20, statusKl, jetzt, 1);
+    }
   } else {
     // Oben der Titel groß (16 Pixel hoch)
     zeichneZeile(0, titel, jetzt, 2);
@@ -1224,7 +1418,7 @@ void setup() {
   Serial.begin(115200);
   delay(2000);   // Zeit für den Seriellen Monitor, sonst gehen die ersten Zeilen verloren
   Serial.println();
-  Serial.println("=== RFID-Plattenspieler, Version 2 ===");
+  Serial.println("=== RFID-Plattenspieler, Version 2.1 ===");
 
   // --- Display ---
   anzeigeSperre = xSemaphoreCreateMutex();
@@ -1305,6 +1499,7 @@ void setup() {
   auftragSperre = xSemaphoreCreateMutex();
   // Spotify auf Kern 0 (dort läuft auch das WLAN), großer Stapel für die
   // Verschlüsselung. Motor auf Kern 1 mit höherer Priorität als loop().
+  spotifyLebtMs = millis();
   xTaskCreatePinnedToCore(spotifyTask, "spotify", 12288, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(motorTask,   "motor",   2048,  NULL, 2, NULL, 1);
   // Display auf Kern 1 mit derselben Priorität wie loop(). Größerer Stapel
@@ -1333,5 +1528,14 @@ void loop() {
   }
 
   aktualisiereWiedergabe();
+
+  // Wächter: Meldet sich die Spotify-Aufgabe zu lange nicht, hängt sie
+  // irgendwo fest. Dann lieber neu starten, statt ewig "Starte..." zu zeigen.
+  if (millis() - spotifyLebtMs > WAECHTER_MS) {
+    Serial.println("Spotify-Aufgabe hängt. Starte den ESP32 neu...");
+    zeigeHinweis("Neustart...");
+    delay(1500);
+    ESP.restart();
+  }
   delay(2);                                       // anderen Aufgaben Zeit lassen
 }
