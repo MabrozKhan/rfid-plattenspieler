@@ -23,13 +23,15 @@ Alle Teile sind fertig ausgerichtet und liegen mit der richtigen Seite auf dem D
 | 14_Shuffle_Halter_beliebig | beliebig | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |
 | 15_Tonarm_Achse_Stift | schwarz | nein | zwei Stärken, den passenden nehmen |
 | 16_Bedienhalter_Taster_Encoder | beliebig | nein | wird von unten an die zwei Dome der Taster geschraubt |
-| 17_Schriftzug_Lucida / _Brush / _Corsiva | schwarz | nein | nur eine Variante drucken, Schichthöhe 0,08, langsam |
+| 17_Namensschild_FARBWECHSEL_1-0mm | weiß, ab 1,0 mm schwarz | nein | Rückseite auf dem Bett, Schichthöhe 0,08, Farbwechsel bei 1,0 mm |
 | 18_Bohrschablone_Shuffle_beliebig | beliebig | nein | Hilfsteil zum Bohren, kommt nicht ins Gerät |
 | 20_Schallplatte_schwarz | schwarz | nein | liegt mit der Oberseite auf dem Bett |
 
 ## Einstellungen
 
 Schichthöhe 0,12 mm für Oberteil und Teller, variable Schichthöhe an, Naht hinten, Außenwand 60 bis 80 mm/s, präzise Wand an. Bügeln nur für die oberste Fläche.
+
+Namensschild mit AMS. In Bambu Studio in der Vorschau den Schieberegler auf die erste Schicht über 1,0 mm stellen, mit Rechtsklick einen Filamentwechsel auf Schwarz setzen. Bis 1,0 mm druckt Weiß oder Grau, das ist später der Grund der Gravur.
 
 ## Montage
 
@@ -45,4 +47,4 @@ Schichthöhe 0,12 mm für Oberteil und Teller, variable Schichthöhe an, Naht hi
 10. Den 12x12-Taster mit den Beinchen in die Schlitze des Shuffle-Halters legen. Den Halter unter dem Loch an den Deckel kleben, der Stößel des Tasters zeigt nach oben zum Loch.
 11. Den Stößel von unten durch das Loch stecken und oben in die Buchse des Pucks kleben. Der Flansch unten verhindert, dass er herausfällt. Vor dem Kleben prüfen, dass der Taster klickt.
 12. Shuffle-Taster an GPIO 17 und GND (Stecker J8). Linke Tastenkappe ist Zurück (GPIO 33), rechte ist Weiter (GPIO 32).
-13. Schriftzug unten links an die Front kleben, etwa 8 mm vom linken Rand und 6 mm über der Unterkante. Sekundenkleber in kleinen Punkten, sonst quillt er an den Rändern raus.
+13. Namensschild unten links an die Front kleben, etwa 12 mm vom linken Rand und 4 mm über der Unterkante. Sekundenkleber in kleinen Punkten auf die Rückseite, sonst quillt er an den Rändern raus.
