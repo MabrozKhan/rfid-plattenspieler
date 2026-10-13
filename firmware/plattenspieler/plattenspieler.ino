@@ -1,5 +1,5 @@
 /*
-  RFID-Plattenspieler, Version 2.1
+  RFID-Plattenspieler, Version 2.2
 
   Bedienung
     Platte auflegen            Link wird gelesen, noch keine Musik
@@ -10,6 +10,7 @@
     Drehgeber drehen           Lautstärke in 5er-Schritten, geht auch in der Pause
     Drehgeber drücken          Stumm an und aus
     Taster Weiter / Zurück     nächster / vorheriger Titel, geht auch in der Pause
+    Shuffle-Knopf (Puck)       Zufallswiedergabe an und aus
 
   Board in der Arduino IDE   ESP32 Dev Module
   Bibliotheken               MFRC522 (GithubCommunity), Adafruit SSD1306,
@@ -23,6 +24,7 @@
     Drehgeber KY-040 CLK 34, DT 35, SW 13, Plus an 3V3 (nicht 5 V), GND an GND
     Taster Weiter    zwischen GPIO 32 und GND
     Taster Zurück    zwischen GPIO 33 und GND
+    Taster Shuffle   zwischen GPIO 17 und GND
     Tonarm-Schalter  Mikroschalter, COM an GND, NO an GPIO 16
     Display SSD1306  128 x 32, I2C: SDA an GPIO 21, SCL an GPIO 4, VCC an 3V3, GND
 
@@ -89,6 +91,7 @@ const int8_t  LAUTSTAERKE_SCHRITT    = 5;           // Prozent pro Raste
 // auf 3,3 V (INPUT_PULLUP). Gedrückt liegt der Pin auf 0 V.
 const uint8_t PIN_WEITER  = 32;
 const uint8_t PIN_ZURUECK = 33;
+const uint8_t PIN_ZUFALL  = 17;    // Shuffle-Knopf unter dem Puck
 const uint8_t PIN_TONARM  = 16;
 // true: Schalter gedrückt heißt Tonarm liegt auf der Platte.
 // Ist es bei deiner Mechanik umgekehrt, auf false stellen.
@@ -153,6 +156,7 @@ struct Auftraege {
   int8_t     spruenge = 0;            // +2 = zweimal weiter, -1 = einmal zurück
   int16_t    lautAenderung = 0;       // in Prozentpunkten, aufsummiert
   bool       stummUmschalten = false;
+  bool       zufallUmschalten = false;
 };
 
 // Zustand eines Tasters fürs Entprellen
@@ -188,6 +192,7 @@ uint32_t letzteAbfrage   = 0;
 
 Taster tasterWeiter   = { PIN_WEITER,  false, false, 0 };
 Taster tasterZurueck  = { PIN_ZURUECK, false, false, 0 };
+Taster tasterZufall   = { PIN_ZUFALL,  false, false, 0 };
 Taster tasterTonarm   = { PIN_TONARM,  false, false, 0 };
 Taster tasterDrehKnopf = { PIN_DREH_SW, false, false, 0 };
 
@@ -213,6 +218,7 @@ String           offenerStartUri;
 uint32_t         offenerStartNr   = 0;
 uint8_t          offenerStartRunde = 0;     // 0 = nichts offen
 uint32_t         naechsterStartVersuch = 0;
+bool             zufallAn = false;          // Zufallswiedergabe gerade an?
 uint8_t          verbindungsFehlerInFolge = 0;
 bool             anfrageProtokoll = true;         // false = Anfrage nicht im Monitor zeigen
 
@@ -232,6 +238,8 @@ String           anzeigeStatusKlein;     // kleine Zeile darunter
 volatile uint32_t hinweisBis      = 0;
 volatile int     anzeigeLautstaerke = -1;
 volatile uint32_t einblendungBis  = 0;
+volatile uint32_t zufallEinblendungBis = 0;   // "Zufall an/aus" groß zeigen
+volatile bool     anzeigeZufall = false;
 
 // ===========================================================================
 // Teil 1: WLAN
@@ -620,7 +628,11 @@ bool weiter()          { return playerBefehl("PUT",  "play",     "", "{}"); }
 bool pausiere()        { return playerBefehl("PUT",  "pause",    "", "{}"); }
 bool naechsterTitel()  { return playerBefehl("POST", "next",     "", "{}"); }
 bool vorherigerTitel() { return playerBefehl("POST", "previous", "", "{}"); }
-bool zufallAus()       { return playerBefehl("PUT",  "shuffle",  "&state=false", "{}"); }
+bool zufallAus() {
+  bool ok = playerBefehl("PUT", "shuffle", "&state=false", "{}");
+  if (ok) zufallAn = false;
+  return ok;
+}
 
 bool setzeLautstaerke(int prozent) {
   return playerBefehl("PUT", "volume", "&volume_percent=" + String(prozent), "{}");
@@ -760,7 +772,7 @@ void spotifyTask(void* parameter) {
     xSemaphoreGive(auftragSperre);
 
     bool etwasZuTun = a.wiedergabe != W_NICHTS || a.spruenge != 0 ||
-                      a.lautAenderung != 0 || a.stummUmschalten;
+                      a.lautAenderung != 0 || a.stummUmschalten || a.zufallUmschalten;
     // Ein Start ist vorhin gescheitert: nach der Pause automatisch neu anlaufen,
     // solange dieselbe Platte liegt und der Tonarm unten ist.
     if (!etwasZuTun && offenerStartRunde > 0) {
@@ -861,6 +873,17 @@ void spotifyTask(void* parameter) {
       anzeigeLautstaerke = lautstaerke;
       einblendungBis = millis() + EINBLENDUNG_MS;   // groß einblenden
     }
+
+    // --- 4. Zufallswiedergabe ---
+    if (a.zufallUmschalten) {
+      bool neu = !zufallAn;
+      if (playerBefehl("PUT", "shuffle", neu ? "&state=true" : "&state=false", "{}")) {
+        zufallAn = neu;
+      }
+      Serial.printf("Zufall %s\n", zufallAn ? "an" : "aus");
+      anzeigeZufall = zufallAn;
+      zufallEinblendungBis = millis() + EINBLENDUNG_MS;
+    }
   }
 }
 
@@ -884,6 +907,12 @@ void auftragLautstaerke(int16_t aenderung) {
   xSemaphoreTake(auftragSperre, portMAX_DELAY);
   int neu = offeneAuftraege.lautAenderung + aenderung;
   offeneAuftraege.lautAenderung = constrain(neu, -100, 100);
+  xSemaphoreGive(auftragSperre);
+}
+
+void auftragZufall() {
+  xSemaphoreTake(auftragSperre, portMAX_DELAY);
+  offeneAuftraege.zufallUmschalten = !offeneAuftraege.zufallUmschalten;
   xSemaphoreGive(auftragSperre);
 }
 
@@ -1088,6 +1117,10 @@ void pruefeTaster() {
   if (tasterGedrueckt(tasterZurueck)) {
     if (darfSpringen) auftragSprung(-1);
     else Serial.println("Zurück ignoriert: Platte noch nicht gestartet.");
+  }
+  if (tasterGedrueckt(tasterZufall)) {
+    if (darfSpringen) auftragZufall();
+    else Serial.println("Shuffle ignoriert: Platte noch nicht gestartet.");
   }
 }
 
@@ -1319,6 +1352,17 @@ void zeichneAnzeige() {
     return;
   }
 
+  // 1b. Zufall gerade umgeschaltet: groß einblenden
+  if ((int32_t)(zufallEinblendungBis - jetzt) > 0) {
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.print("Zufall");
+    display.setCursor(0, 16);
+    display.print(anzeigeZufall ? "an" : "aus");
+    display.display();
+    return;
+  }
+
   // 2. Hinweis, z. B. "Echo nicht erreichbar"
   if ((int32_t)(hinweisBis - jetzt) > 0 && hinweis.length() > 0) {
     display.setCursor(0, 0);
@@ -1418,7 +1462,7 @@ void setup() {
   Serial.begin(115200);
   delay(2000);   // Zeit für den Seriellen Monitor, sonst gehen die ersten Zeilen verloren
   Serial.println();
-  Serial.println("=== RFID-Plattenspieler, Version 2.1 ===");
+  Serial.println("=== RFID-Plattenspieler, Version 2.2 ===");
 
   // --- Display ---
   anzeigeSperre = xSemaphoreCreateMutex();
@@ -1442,6 +1486,7 @@ void setup() {
   // --- Taster, Tonarm, Drehgeber ---
   pinMode(PIN_WEITER,  INPUT_PULLUP);
   pinMode(PIN_ZURUECK, INPUT_PULLUP);
+  pinMode(PIN_ZUFALL,  INPUT_PULLUP);
   pinMode(PIN_TONARM,  INPUT_PULLUP);
   pinMode(PIN_DREH_SW, INPUT_PULLUP);
   pinMode(PIN_DREH_CLK, INPUT);                   // Pull-ups sitzen auf der KY-040-Platine

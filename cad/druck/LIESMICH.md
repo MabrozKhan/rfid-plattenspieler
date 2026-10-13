@@ -15,11 +15,16 @@ Alle Teile sind fertig ausgerichtet und liegen mit der richtigen Seite auf dem D
 | 09_Tonarm_Arm_schwarz_PAUSE_8-6mm | schwarz | nein | Pause bei 8,6 mm, M8-Mutter einlegen |
 | 10_Tonarm_Stuetze_schwarz | schwarz | nein | |
 | 11_Drehknopf_schwarz | schwarz | nein | Bügeln, Schichthöhe 0,08 |
-| 12_Tastenkappe_Weiter / _Zurueck | schwarz | nein | Schichthöhe 0,08 |
+| 12_Tastenkappe_Zurueck_links | schwarz | nein | linkes Loch, Symbol vertieft, Schichthöhe 0,08 |
+| 12_Tastenkappe_Weiter_rechts | schwarz | nein | rechtes Loch, Symbol vertieft, Schichthöhe 0,08 |
 | 13_Fuss_1 bis 4 | schwarz | nein | |
-| 14_Puck_schwarz | schwarz | nein | Bügeln |
+| 14_Shuffle_Puck_schwarz | schwarz | nein | Shuffle-Knopf hinten links, Symbol vertieft, kein Bügeln |
+| 14_Shuffle_Stoessel_schwarz | schwarz | nein | wird von unten in den Puck geklebt |
+| 14_Shuffle_Halter_beliebig | beliebig | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |
 | 15_Tonarm_Achse_Stift | schwarz | nein | zwei Stärken, den passenden nehmen |
 | 16_Bedienhalter_Taster_Encoder | beliebig | nein | wird von unten an die zwei Dome der Taster geschraubt |
+| 17_Schriftzug_Lucida / _Brush / _Corsiva | schwarz | nein | nur eine Variante drucken, Schichthöhe 0,08, langsam |
+| 18_Bohrschablone_Shuffle_beliebig | beliebig | nein | Hilfsteil zum Bohren, kommt nicht ins Gerät |
 | 20_Schallplatte_schwarz | schwarz | nein | liegt mit der Oberseite auf dem Bett |
 
 ## Einstellungen
@@ -36,3 +41,8 @@ Schichthöhe 0,12 mm für Oberteil und Teller, variable Schichthöhe an, Naht hi
 6. Stütze von unten mit einer M2-Schraube durch den Deckel befestigen.
 7. Bedienhalter: Die zwei 12x12-Taster mit den Beinchen in die Schlitze legen, die Beinchen schauen unten raus und werden dort verlötet. Den Drehgeber von unten durch das Loch in der Plattform stecken und mit seiner Mutter oben auf der Plattform festziehen. Dann den Halter mit zwei M2-Schrauben von unten an die Dome neben den Tastenlöchern schrauben. Der Hals des Drehgebers sitzt so 9 mm tiefer als bei der Befestigung direkt am Deckel, der Knopf schwebt knapp über dem Deckel.
 8. Alle Schrauben sind M2 und werden direkt in die 1,8-mm-Löcher gedreht.
+9. Shuffle-Loch bohren. Die Bohrschablone auf die hintere linke Ecke legen, die Lippen liegen außen an der linken und der hinteren Wand an. Durch die Führung mit 7 mm bohren. Die Mitte liegt 22 mm von links und 22 mm von hinten.
+10. Den 12x12-Taster mit den Beinchen in die Schlitze des Shuffle-Halters legen. Den Halter unter dem Loch an den Deckel kleben, der Stößel des Tasters zeigt nach oben zum Loch.
+11. Den Stößel von unten durch das Loch stecken und oben in die Buchse des Pucks kleben. Der Flansch unten verhindert, dass er herausfällt. Vor dem Kleben prüfen, dass der Taster klickt.
+12. Shuffle-Taster an GPIO 17 und GND (Stecker J8). Linke Tastenkappe ist Zurück (GPIO 33), rechte ist Weiter (GPIO 32).
+13. Schriftzug unten links an die Front kleben, etwa 8 mm vom linken Rand und 6 mm über der Unterkante. Sekundenkleber in kleinen Punkten, sonst quillt er an den Rändern raus.

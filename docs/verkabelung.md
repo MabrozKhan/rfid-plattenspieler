@@ -1,6 +1,6 @@
 # Verkabelung
 
-Stand Firmware 2.1. Wenn sich ein Pin ändert, wird diese Datei zusammen mit der Firmware angepasst. Maßgeblich sind die Konstanten oben in `firmware/plattenspieler/plattenspieler.ino`.
+Stand Firmware 2.2. Wenn sich ein Pin ändert, wird diese Datei zusammen mit der Firmware angepasst. Maßgeblich sind die Konstanten oben in `firmware/plattenspieler/plattenspieler.ino`.
 
 ![Schaltplan](schaltplan.svg)
 
@@ -30,6 +30,7 @@ Strom kommt nur über die USB-Buchse des ESP32. Ein eigener Spannungsregler ist 
 | 14 | ULN2003 IN4 | Motor Spule D | zuckt beim Einschalten kurz, harmlos |
 | 32 | Taster Weiter | nächster Titel | interner Pull-up, gedrückt = LOW |
 | 33 | Taster Zurück | vorheriger Titel | interner Pull-up, gedrückt = LOW |
+| 17 | Taster Shuffle | Zufall an und aus | interner Pull-up, gedrückt = LOW |
 | 16 | Tonarm-Schalter NO | Tonarm unten/oben | interner Pull-up |
 
 ## Versorgung
@@ -38,7 +39,7 @@ Strom kommt nur über die USB-Buchse des ESP32. Ein eigener Spannungsregler ist 
 | --- | --- | --- |
 | 5V | ESP32 Pin VIN (USB-Spannung) | ULN2003 + |
 | 3V3 | ESP32 Pin 3V3 | RC522 3.3V, OLED VCC, KY-040 + |
-| GND | ESP32 GND | alle Module, beide Taster, Tonarm-Schalter COM |
+| GND | ESP32 GND | alle Module, alle drei Taster, Tonarm-Schalter COM |
 
 Wichtig. Der KY-040 muss an 3V3 hängen. GPIO 34 und 35 vertragen keine 5 V. Der RC522 läuft ebenfalls nur mit 3,3 V. Auf die 5V-Schiene kommt ausschließlich der ULN2003.
 
@@ -55,16 +56,19 @@ Die Reihenfolge der Stiftleisten entspricht der Reihenfolge am jeweiligen Modul.
 | J5 | 2 | + (5V), − (GND) | ULN2003 Versorgung |
 | J6 | 3 | Weiter (32), Zurück (33), GND | Taster-Platine im Deckel |
 | J7 | 2 | NO (16), COM (GND) | Tonarm-Schalter |
+| J8 | 2 | Shuffle (17), GND | Shuffle-Taster unter dem Puck |
 
 Vor dem Einstecken die Beschriftung am eigenen Modul prüfen. Gerade beim OLED gibt es Varianten mit VCC und GND vertauscht.
 
-## Taster-Platine im Deckel
+## Taster im Deckel
 
-Beide Taster sitzen auf einer kleinen Lochrasterplatine, die von unten an die zwei Dome im Deckel geschraubt wird. Je ein Bein beider Taster wird verbunden und geht als gemeinsames GND an J6. Das jeweils andere Bein geht einzeln an Weiter und Zurück. Bei den 4-beinigen 12 x 12 Tastern sind je zwei Beine intern verbunden. Diagonal gegenüberliegende Beine verwenden, dann stimmt es sicher.
+Weiter und Zurück liegen im gedruckten Bedienhalter (`cad/druck/16_Bedienhalter_Taster_Encoder`), der von unten an die zwei Dome neben den Tastenlöchern geschraubt wird. Die Beinchen schauen unten aus dem Halter raus, dort werden die Kabel direkt angelötet. Je ein Bein beider Taster wird verbunden und geht als gemeinsames GND an J6, das jeweils andere Bein einzeln an Weiter und Zurück. Bei den 4-beinigen 12 x 12 Tastern sind je zwei Beine intern verbunden. Diagonal gegenüberliegende Beine verwenden, dann stimmt es sicher.
+
+Der Shuffle-Taster sitzt in einem eigenen kleinen Halter unter dem Puck hinten links. Ein Bein an GPIO 17, das diagonal gegenüberliegende an GND (J8).
 
 ## Tonarm-Schalter
 
-COM an GND, NO an GPIO 16, NC bleibt frei. Im Gehäuse drückt die Stellschraube im Arm den Schalter, wenn der Arm unten ist. Auf dem Steckbrett war es andersherum, deshalb steht in der Firmware im Moment `TONARM_GEDRUECKT_HEISST_UNTEN = false`. Nach dem Einbau prüfen. Wenn die Anzeige Pause zeigt, obwohl der Arm auf der Platte liegt, die Konstante auf `true` stellen.
+COM an GND, NO an GPIO 16, NC bleibt frei. Der Schalter sitzt fest unter dem Deckel neben der Tonarmsäule. Im Gehäuse drückt der Schaltklotz am Arm durch das Loch im Deckel auf den Schalter, wenn der Arm auf der Platte liegt. Auf dem Steckbrett war es andersherum, deshalb steht in der Firmware im Moment `TONARM_GEDRUECKT_HEISST_UNTEN = false`. Nach dem Einbau prüfen. Wenn die Anzeige Pause zeigt, obwohl der Arm auf der Platte liegt, die Konstante auf `true` stellen.
 
 ## Motor
 
