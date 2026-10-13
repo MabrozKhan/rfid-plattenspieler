@@ -19,6 +19,7 @@ Alle Teile sind fertig ausgerichtet und liegen mit der richtigen Seite auf dem D
 | 13_Fuss_1 bis 4 | schwarz | nein | |
 | 14_Puck_schwarz | schwarz | nein | Bügeln |
 | 15_Tonarm_Achse_Stift | schwarz | nein | zwei Stärken, den passenden nehmen |
+| 16_Bedienhalter_Taster_Encoder | beliebig | nein | wird von unten an die zwei Dome der Taster geschraubt |
 | 20_Schallplatte_schwarz | schwarz | nein | liegt mit der Oberseite auf dem Bett |
 
 ## Einstellungen
@@ -33,4 +34,5 @@ Schichthöhe 0,12 mm für Oberteil und Teller, variable Schichthöhe an, Naht hi
 4. Mikroschalter unter dem Deckel auf die zwei Stifte stecken, Hebel nach oben, Hebelende unter das Loch.
 5. Im Tonkopf steckt die M8-Mutter. Mehr Gewicht bringt eine M8-Madenschraube (6 mm) oder Lötzinn im Mutterloch.
 6. Stütze von unten mit einer M2-Schraube durch den Deckel befestigen.
-7. Alle Schrauben sind M2 und werden direkt in die 1,8-mm-Löcher gedreht.
+7. Bedienhalter: Die zwei 12x12-Taster mit den Beinchen in die Schlitze legen, die Beinchen schauen unten raus und werden dort verlötet. Den Drehgeber von unten durch das Loch in der Plattform stecken und mit seiner Mutter oben auf der Plattform festziehen. Dann den Halter mit zwei M2-Schrauben von unten an die Dome neben den Tastenlöchern schrauben. Der Hals des Drehgebers sitzt so 9 mm tiefer als bei der Befestigung direkt am Deckel, der Knopf schwebt knapp über dem Deckel.
+8. Alle Schrauben sind M2 und werden direkt in die 1,8-mm-Löcher gedreht.
