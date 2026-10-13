@@ -62,7 +62,7 @@ Vor dem Einstecken die Beschriftung am eigenen Modul prüfen. Gerade beim OLED g
 
 ## Taster im Deckel
 
-Weiter und Zurück liegen im gedruckten Bedienhalter (`cad/druck/16_Bedienhalter_Taster_Encoder`), der von unten an die zwei Dome neben den Tastenlöchern geschraubt wird. Die Beinchen schauen unten aus dem Halter raus, dort werden die Kabel direkt angelötet. Je ein Bein beider Taster wird verbunden und geht als gemeinsames GND an J6, das jeweils andere Bein einzeln an Weiter und Zurück. Bei den 4-beinigen 12 x 12 Tastern sind je zwei Beine intern verbunden. Diagonal gegenüberliegende Beine verwenden, dann stimmt es sicher.
+Weiter und Zurück liegen im gedruckten Bedienhalter (`cad/druck/07_Bedienhalter_Taster_Encoder_grau`), der von unten an die zwei Dome neben den Tastenlöchern geschraubt wird. Die Beinchen schauen unten aus dem Halter raus, dort werden die Kabel direkt angelötet. Je ein Bein beider Taster wird verbunden und geht als gemeinsames GND an J6, das jeweils andere Bein einzeln an Weiter und Zurück. Bei den 4-beinigen 12 x 12 Tastern sind je zwei Beine intern verbunden. Diagonal gegenüberliegende Beine verwenden, dann stimmt es sicher.
 
 Der Shuffle-Taster sitzt in einem eigenen kleinen Halter unter dem Puck hinten links. Ein Bein an GPIO 17, das diagonal gegenüberliegende an GND (J8).
 

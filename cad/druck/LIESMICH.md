@@ -2,36 +2,38 @@
 
 Alle Teile sind fertig ausgerichtet und liegen mit der richtigen Seite auf dem Druckbett. Einfach in Bambu Studio laden.
 
+Sortiert nach Farbe. 01 bis 10 sind grau, dazu gehören auch alle Teile, die innen sitzen und die man nicht sieht. 11 ist das Namensschild mit Farbwechsel. Ab 12 ist alles schwarz.
+
 | Datei | Farbe | Support | Hinweis |
 | --- | --- | --- | --- |
 | 01_Oberteil_grau | grau | nein | liegt kopfüber, Deckseite auf dem Bett, Brim |
 | 02_Bodenplatte_grau | grau | ja, nur unter dem Motorhalter | Brim |
 | 03_Lagerdeckel_grau | grau | nein | trägt den RC522, wird lose auf den Ring gesetzt |
 | 04_Lagerstift_grau | grau | nein | wird in den Lagerdeckel geklebt |
-| 05_Teller_schwarz | schwarz | ja, innen im Kragen | Bügeln für die Oberseite |
-| 06_Riemenrad_schwarz | schwarz | nein | |
-| 07_Tonarm_Saeule_schwarz | schwarz | ja, unter der Scheibe | |
-| 08_Tonarm_Anschlagring_schwarz | schwarz | nein | |
-| 09_Tonarm_Arm_schwarz_PAUSE_8-6mm | schwarz | nein | Pause bei 8,6 mm, M8-Mutter einlegen |
-| 10_Tonarm_Stuetze_schwarz | schwarz | nein | |
-| 11_Drehknopf_schwarz | schwarz | nein | Bügeln, Schichthöhe 0,08 |
-| 12_Tastenkappe_Zurueck_links | schwarz | nein | linkes Loch, Symbol vertieft, Schichthöhe 0,08 |
-| 12_Tastenkappe_Weiter_rechts | schwarz | nein | rechtes Loch, Symbol vertieft, Schichthöhe 0,08 |
-| 13_Fuss_1 bis 4 | schwarz | nein | |
-| 14_Shuffle_Puck_schwarz | schwarz | nein | Shuffle-Knopf hinten links, Symbol vertieft, kein Bügeln |
-| 14_Shuffle_Stoessel_schwarz | schwarz | nein | wird von unten in den Puck geklebt |
-| 14_Shuffle_Halter_beliebig | beliebig | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |
-| 15_Tonarm_Achse_Stift | schwarz | nein | zwei Stärken, den passenden nehmen |
-| 16_Bedienhalter_Taster_Encoder | beliebig | nein | wird von unten an die zwei Dome der Taster geschraubt |
-| 17_Namensschild_FARBWECHSEL_1-0mm | weiß, ab 1,0 mm schwarz | nein | Rückseite auf dem Bett, Schichthöhe 0,08, Farbwechsel bei 1,0 mm |
-| 18_Bohrschablone_Shuffle_beliebig | beliebig | nein | Hilfsteil zum Bohren, kommt nicht ins Gerät |
-| 20_Schallplatte_schwarz | schwarz | nein | liegt mit der Oberseite auf dem Bett |
+| 05_Riemenrad_grau | grau | nein | sitzt unter dem Teller, unsichtbar |
+| 06_Tonarm_Anschlagring_grau | grau | nein | sitzt unter dem Deckel |
+| 07_Bedienhalter_Taster_Encoder_grau | grau | nein | wird von unten an die zwei Dome der Taster geschraubt |
+| 08_Shuffle_Halter_grau | grau | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |
+| 09_Shuffle_Stoessel_grau | grau | nein | wird von unten in den Puck geklebt, verschwindet unter dem Puck |
+| 10_Bohrschablone_Shuffle_grau | grau | nein | Hilfsteil zum Bohren, kommt nicht ins Gerät |
+| 11_Namensschild_grau_ab_1-0mm_schwarz | grau, ab 1,0 mm schwarz | nein | grau bis 1,0 mm, dann schwarz (AMS), Rückseite auf dem Bett, Schichthöhe 0,08 |
+| 12_Teller_schwarz | schwarz | ja, innen im Kragen | Bügeln für die Oberseite |
+| 13_Schallplatte_schwarz | schwarz | nein | liegt mit der Oberseite auf dem Bett |
+| 14_Tonarm_Saeule_schwarz | schwarz | ja, unter der Scheibe |  |
+| 15_Tonarm_Arm_schwarz_PAUSE_8-6mm | schwarz | nein | Pause bei 8,6 mm, M8-Mutter einlegen |
+| 16_Tonarm_Achse_Stift_schwarz | schwarz | nein | zwei Stärken, den passenden nehmen |
+| 17_Tonarm_Stuetze_schwarz | schwarz | nein |  |
+| 18_Drehknopf_schwarz | schwarz | nein | Bügeln, Schichthöhe 0,08 |
+| 19_Tastenkappe_Zurueck_links_schwarz | schwarz | nein | linkes Loch, Symbol vertieft, Schichthöhe 0,08 |
+| 19_Tastenkappe_Weiter_rechts_schwarz | schwarz | nein | rechtes Loch, Symbol vertieft, Schichthöhe 0,08 |
+| 20_Shuffle_Puck_schwarz | schwarz | nein | Shuffle-Knopf hinten links, Symbol vertieft, kein Bügeln |
+| 21_Fuss_1 bis 4_schwarz | schwarz | nein |  |
 
 ## Einstellungen
 
 Schichthöhe 0,12 mm für Oberteil und Teller, variable Schichthöhe an, Naht hinten, Außenwand 60 bis 80 mm/s, präzise Wand an. Bügeln nur für die oberste Fläche.
 
-Namensschild mit AMS. In Bambu Studio in der Vorschau den Schieberegler auf die erste Schicht über 1,0 mm stellen, mit Rechtsklick einen Filamentwechsel auf Schwarz setzen. Bis 1,0 mm druckt Weiß oder Grau, das ist später der Grund der Gravur.
+Namensschild mit AMS. In Bambu Studio in der Vorschau den Schieberegler auf die erste Schicht über 1,0 mm stellen, mit Rechtsklick einen Filamentwechsel auf Schwarz setzen. Bis 1,0 mm druckt Grau, das ist später der Grund der Gravur.
 
 ## Montage
 
