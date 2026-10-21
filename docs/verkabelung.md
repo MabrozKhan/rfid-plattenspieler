@@ -23,7 +23,7 @@ Strom kommt nur über die USB-Buchse des ESP32. Ein eigener Spannungsregler ist 
 | 4 | OLED SCL | I2C Takt | |
 | 34 | KY-040 CLK | Drehgeber A | nur Eingang, Pull-up sitzt auf dem KY-040 |
 | 35 | KY-040 DT | Drehgeber B | nur Eingang, Pull-up sitzt auf dem KY-040 |
-| 13 | KY-040 SW | Knopf (stumm) | interner Pull-up |
+| 15 | KY-040 SW | Knopf (stumm) | interner Pull-up, vorher 13 |
 | 25 | ULN2003 IN1 | Motor Spule A | |
 | 26 | ULN2003 IN2 | Motor Spule B | |
 | 27 | ULN2003 IN3 | Motor Spule C | |
@@ -51,7 +51,7 @@ Die Reihenfolge der Stiftleisten entspricht der Reihenfolge am jeweiligen Modul.
 | --- | --- | --- | --- |
 | J1 | 8 | SDA (5), SCK (18), MOSI (23), MISO (19), IRQ (frei), GND, RST (22), 3V3 | RC522 |
 | J2 | 4 | GND, VCC (3V3), SCL (4), SDA (21) | OLED |
-| J3 | 5 | CLK (34), DT (35), SW (13), + (3V3), GND | KY-040 |
+| J3 | 5 | CLK (34), DT (35), SW (15), + (3V3), GND | KY-040 |
 | J4 | 4 | IN1 (25), IN2 (26), IN3 (27), IN4 (14) | ULN2003 Eingänge |
 | J5 | 2 | + (5V), − (GND) | ULN2003 Versorgung |
 | J6 | 3 | Weiter (32), Zurück (33), GND | Taster-Platine im Deckel |

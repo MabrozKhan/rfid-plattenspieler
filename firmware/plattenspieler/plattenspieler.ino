@@ -21,7 +21,7 @@
   Verkabelung
     RC522            SDA 5, SCK 18, MOSI 23, MISO 19, RST 22, GND, 3.3V an 3V3
     ULN2003 (Motor)  IN1 25, IN2 26, IN3 27, IN4 14, Plus an VIN (5 V), Minus an GND
-    Drehgeber KY-040 CLK 34, DT 35, SW 13, Plus an 3V3 (nicht 5 V), GND an GND
+    Drehgeber KY-040 CLK 34, DT 35, SW 15, Plus an 3V3 (nicht 5 V), GND an GND
     Taster Weiter    zwischen GPIO 32 und GND
     Taster Zurück    zwischen GPIO 33 und GND
     Taster Shuffle   zwischen GPIO 17 und GND
@@ -67,10 +67,15 @@ const uint8_t PIN_RST = 22;
 
 // --- Schrittmotor 28BYJ-48 über ULN2003 ---
 const uint8_t PIN_MOTOR[4] = { 25, 26, 27, 14 };   // IN1 bis IN4
-// Zeit zwischen zwei Halbschritten. 4096 Halbschritte sind eine Umdrehung.
-//   2 ms  ->  etwa 7 Umdrehungen pro Minute
-//   1 ms  ->  etwa 15 Umdrehungen pro Minute (Obergrenze dieses Motors)
-const uint32_t MOTOR_SCHRITT_MS  = 2;
+// Zeit zwischen zwei Schritten.
+// Vollschritt (zwei Spulen gleichzeitig an, mehr Kraft): 2048 Schritte pro Umdrehung.
+//   15 ms ->  etwa 2 Umdrehungen pro Minute (sehr langsam, maximale Kraft)
+//    8 ms ->  etwa 3,7 Umdrehungen pro Minute (aktuell)
+//    4 ms ->  etwa 7 Umdrehungen pro Minute
+// Halbschritt (leiser, weniger Kraft): 4096 Schritte pro Umdrehung.
+//    2 ms ->  etwa 7 Umdrehungen pro Minute (bisherige Einstellung)
+const bool     MOTOR_VOLLSCHRITT = true;
+const uint32_t MOTOR_SCHRITT_MS  = 8;
 const bool     MOTOR_RUECKWAERTS = false;           // Drehrichtung umkehren
 
 // --- Drehgeber KY-040 ---
@@ -78,7 +83,7 @@ const bool     MOTOR_RUECKWAERTS = false;           // Drehrichtung umkehren
 // weil die KY-040-Platine eigene Pull-up-Widerstände für CLK und DT hat.
 const uint8_t PIN_DREH_CLK = 34;
 const uint8_t PIN_DREH_DT  = 35;
-const uint8_t PIN_DREH_SW  = 13;                    // Knopf im Drehgeber
+const uint8_t PIN_DREH_SW  = 15;                    // Knopf im Drehgeber (vorher 13)
 // Wie viele Signalwechsel eine Raste ergibt. Beim KY-040 meist 4.
 // Springt die Lautstärke pro Raste um zwei Schritte, hier 2 eintragen.
 // Muss man zwei Rasten drehen für einen Schritt, hier 2 statt 4 testen.
@@ -1441,7 +1446,11 @@ void motorTask(void* parameter) {
       for (uint8_t i = 0; i < 4; i++) {
         digitalWrite(PIN_MOTOR[i], (MUSTER[schritt] >> (3 - i)) & 1);
       }
-      schritt = (schritt + (MOTOR_RUECKWAERTS ? 7 : 1)) & 7;
+      if (MOTOR_VOLLSCHRITT) {                    // nur die Muster mit zwei Spulen
+        schritt = ((schritt | 1) + (MOTOR_RUECKWAERTS ? 6 : 2)) & 7;
+      } else {
+        schritt = (schritt + (MOTOR_RUECKWAERTS ? 7 : 1)) & 7;
+      }
       spulenAn = true;
       vTaskDelayUntil(&letzterSchritt, pdMS_TO_TICKS(MOTOR_SCHRITT_MS));
     } else {
