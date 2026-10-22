@@ -70,12 +70,13 @@ const uint8_t PIN_MOTOR[4] = { 25, 26, 27, 14 };   // IN1 bis IN4
 // Zeit zwischen zwei Schritten.
 // Vollschritt (zwei Spulen gleichzeitig an, mehr Kraft): 2048 Schritte pro Umdrehung.
 //   15 ms ->  etwa 2 Umdrehungen pro Minute (sehr langsam, maximale Kraft)
-//    8 ms ->  etwa 3,7 Umdrehungen pro Minute (aktuell)
+//   12 ms ->  etwa 2,4 Umdrehungen pro Minute (aktuell)
+//    8 ms ->  etwa 3,7 Umdrehungen pro Minute
 //    4 ms ->  etwa 7 Umdrehungen pro Minute
 // Halbschritt (leiser, weniger Kraft): 4096 Schritte pro Umdrehung.
 //    2 ms ->  etwa 7 Umdrehungen pro Minute (bisherige Einstellung)
 const bool     MOTOR_VOLLSCHRITT = true;
-const uint32_t MOTOR_SCHRITT_MS  = 8;
+const uint32_t MOTOR_SCHRITT_MS  = 12;
 const bool     MOTOR_RUECKWAERTS = false;           // Drehrichtung umkehren
 
 // --- Drehgeber KY-040 ---
