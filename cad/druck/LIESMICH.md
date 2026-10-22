@@ -16,6 +16,7 @@ Sortiert nach Farbe. 01 bis 10 sind grau, dazu gehören auch alle Teile, die inn
 | 05b_Riemenrad_Kappe_eng / _locker | grau | nein | nicht mehr nötig, der Käfig hält den Riemen |
 | 05c_Riemenkaefig_grau | grau | ja, nur unter der unteren Lippe | liegt kopfüber, wird um das Riemenrad auf den Boden geklebt, Öffnung zeigt zum Teller |
 | 06_Tonarm_Anschlagring_grau | grau | nein | sitzt unter dem Deckel |
+| 06b_Schalterhebel_Auflage_grau | grau | nein | vier Plättchen 4 mm breit, 0,6 / 1,0 / 1,4 / 1,8 mm dick (kürzestes ist das dünnste), passendes auf den Hebel vom Tonarm-Mikroschalter kleben |
 | 07_Bedienhalter_Taster_Encoder_grau | grau | nein | wird von unten an die zwei Dome der Taster geschraubt |
 | 07b_Encoder_Stuetze_grau | grau | nein | stützt den Drehgeber von unten ab, Höhe vor dem Druck an den Messwert anpassen |
 | 08_Shuffle_Halter_grau | grau | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |

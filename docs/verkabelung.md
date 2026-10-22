@@ -28,8 +28,8 @@ Strom kommt nur über die USB-Buchse des ESP32. Ein eigener Spannungsregler ist 
 | 26 | ULN2003 IN2 | Motor Spule B | |
 | 27 | ULN2003 IN3 | Motor Spule C | |
 | 14 | ULN2003 IN4 | Motor Spule D | zuckt beim Einschalten kurz, harmlos |
-| 32 | Taster Weiter | nächster Titel | interner Pull-up, gedrückt = LOW |
-| 33 | Taster Zurück | vorheriger Titel | interner Pull-up, gedrückt = LOW |
+| 33 | Taster Weiter | nächster Titel | interner Pull-up, gedrückt = LOW |
+| 32 | Taster Zurück | vorheriger Titel | interner Pull-up, gedrückt = LOW |
 | 17 | Taster Shuffle | Zufall an und aus | interner Pull-up, gedrückt = LOW |
 | 16 | Tonarm-Schalter NO | Tonarm unten/oben | interner Pull-up |
 
@@ -54,7 +54,7 @@ Die Reihenfolge der Stiftleisten entspricht der Reihenfolge am jeweiligen Modul.
 | J3 | 5 | CLK (34), DT (35), SW (15), + (3V3), GND | KY-040 |
 | J4 | 4 | IN1 (25), IN2 (26), IN3 (27), IN4 (14) | ULN2003 Eingänge |
 | J5 | 2 | + (5V), − (GND) | ULN2003 Versorgung |
-| J6 | 3 | Weiter (32), Zurück (33), GND | Taster-Platine im Deckel |
+| J6 | 3 | Weiter (33), Zurück (32), GND | Taster-Platine im Deckel |
 | J7 | 2 | NO (16), COM (GND) | Tonarm-Schalter |
 | J8 | 2 | Shuffle (17), GND | Shuffle-Taster unter dem Puck |
 

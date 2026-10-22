@@ -22,8 +22,8 @@
     RC522            SDA 5, SCK 18, MOSI 23, MISO 19, RST 22, GND, 3.3V an 3V3
     ULN2003 (Motor)  IN1 25, IN2 26, IN3 27, IN4 14, Plus an VIN (5 V), Minus an GND
     Drehgeber KY-040 CLK 34, DT 35, SW 15, Plus an 3V3 (nicht 5 V), GND an GND
-    Taster Weiter    zwischen GPIO 32 und GND
-    Taster Zurück    zwischen GPIO 33 und GND
+    Taster Weiter    zwischen GPIO 33 und GND
+    Taster Zurück    zwischen GPIO 32 und GND
     Taster Shuffle   zwischen GPIO 17 und GND
     Tonarm-Schalter  Mikroschalter, COM an GND, NO an GPIO 16
     Display SSD1306  128 x 32, I2C: SDA an GPIO 21, SCL an GPIO 4, VCC an 3V3, GND
@@ -95,8 +95,8 @@ const int8_t  LAUTSTAERKE_SCHRITT    = 5;           // Prozent pro Raste
 // --- Taster ---
 // Alle Taster und Schalter schalten gegen GND. Der ESP32 zieht den Pin intern
 // auf 3,3 V (INPUT_PULLUP). Gedrückt liegt der Pin auf 0 V.
-const uint8_t PIN_WEITER  = 32;
-const uint8_t PIN_ZURUECK = 33;
+const uint8_t PIN_WEITER  = 33;                    // vorher 32, beim Verkabeln getauscht
+const uint8_t PIN_ZURUECK = 32;                    // vorher 33
 const uint8_t PIN_ZUFALL  = 17;    // Shuffle-Knopf unter dem Puck
 const uint8_t PIN_TONARM  = 16;
 // true: Schalter gedrückt heißt Tonarm liegt auf der Platte.
