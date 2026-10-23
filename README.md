@@ -11,7 +11,10 @@ The Spotify link is stored on the record, not in the device. So any record works
 
 ## Demo
 
-<!-- VIDEO: drag turntable_demo.mp4 into this spot in the GitHub web editor -->
+
+
+https://github.com/user-attachments/assets/b4b5ec34-24eb-4c22-aa97-78d0e611a50a
+
 
 Record on, tonearm down, music starts on the Echo. Then volume, skipping and shuffle. The phone microphone makes the stepper sound much louder than it is in the room, with music playing you do not hear it. The video still shows the German display texts of an earlier build.
 
