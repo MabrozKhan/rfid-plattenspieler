@@ -1,4 +1,4 @@
-# Zugangsdaten, niemals hochladen
+# Credentials, never upload
 firmware/secrets.h
 secrets.h
 .env
@@ -7,6 +7,7 @@ secrets.h
 .cache-*
 token.json
 tokens.json
+spotify_config.json
 
 # Python
 __pycache__/
@@ -14,28 +15,26 @@ __pycache__/
 .venv/
 venv/
 
-# PlatformIO und Arduino
+# PlatformIO and Arduino
 .pio/
 build/
 *.bin
 *.elf
 
-# Editoren
+# Editors
 .vscode/
 .idea/
 
-# Slicer und CAD, temporäre Dateien
+# Slicer / CAD temp files
 *.gcode
 *.bak
 *.tmp
 
-# Betriebssystem
+# OS
 Thumbs.db
 desktop.ini
 .DS_Store
 
-# Spotify-Testskript
-spotify_config.json
-
-# Heruntergeladene Bauteil-Modelle (fremde Lizenzen, nicht weitergeben)
+# Downloaded part models (third party licences, do not redistribute)
+cad/parts/
 cad/bauteile/

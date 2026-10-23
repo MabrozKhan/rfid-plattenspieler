@@ -1,24 +1,25 @@
 """
-RFID-Plattenspieler, Phase 2: Spotify am PC testen
+Spotify test tool for the RFID turntable. Used to log in once, get the
+refresh token for the ESP32 and test playback from the PC.
 
-Dieses Skript braucht nur Python 3, keine zusätzlichen Pakete.
+Needs only Python 3, no extra packages.
 
-Aufruf (im Ordner "tools"):
-    python spotify_test.py login                 einmalig bei Spotify anmelden
-    python spotify_test.py devices               Abspielgeräte auflisten
-    python spotify_test.py play LINK [GERÄT]     Album oder Playlist starten
-    python spotify_test.py pause [GERÄT]         Wiedergabe anhalten
+Usage (inside the "tools" folder):
+    python spotify_test.py login                  log in to Spotify once
+    python spotify_test.py devices                list playback devices
+    python spotify_test.py play LINK [DEVICE]     start an album or playlist
+    python spotify_test.py pause [DEVICE]         pause playback
 
-LINK darf ein normaler Spotify-Link sein (https://open.spotify.com/album/...)
-oder eine Spotify-URI (spotify:album:...).
-GERÄT ist ein Teil des Gerätenamens, z. B. "echo". Groß/klein ist egal.
+LINK can be a normal Spotify link (https://open.spotify.com/album/...)
+or a Spotify URI (spotify:album:...).
+DEVICE is part of the device name, e.g. "echo", case insensitive.
 
-Anmeldeverfahren: "Authorization Code mit PKCE". Dabei wird kein Client Secret
-gebraucht, nur die öffentliche Client-ID. Genau so macht es später der ESP32.
+Login uses "Authorization Code with PKCE", so no client secret is needed,
+only the public client ID. The ESP32 does the same.
 
-Dateien, die das Skript anlegt (beide stehen in der .gitignore):
-    spotify_config.json   deine Client-ID
-    token.json            Access Token und Refresh Token
+Files created next to this script (both are in .gitignore):
+    spotify_config.json   your client ID
+    token.json            access token and refresh token
 """
 
 import base64
@@ -35,141 +36,119 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-# --- Feste Einstellungen ---------------------------------------------------
-
-# Diese Adresse muss exakt so im Spotify-Dashboard als Redirect URI stehen.
+# Has to match the redirect URI in the Spotify developer dashboard exactly
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 PORT = 8888
 
-# Berechtigungen, die wir von Spotify anfordern:
-#   user-read-playback-state    Geräte und Wiedergabestatus lesen
-#   user-modify-playback-state  Wiedergabe starten und anhalten
+#   user-read-playback-state    read devices and playback state
+#   user-modify-playback-state  start and pause playback
 SCOPES = "user-read-playback-state user-modify-playback-state"
 
 AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_URL = "https://api.spotify.com/v1"
 
-# Die Dateien liegen immer neben diesem Skript, egal von wo es gestartet wird.
-ORDNER = pathlib.Path(__file__).resolve().parent
-CONFIG_DATEI = ORDNER / "spotify_config.json"
-TOKEN_DATEI = ORDNER / "token.json"
+FOLDER = pathlib.Path(__file__).resolve().parent
+CONFIG_FILE = FOLDER / "spotify_config.json"
+TOKEN_FILE = FOLDER / "token.json"
 
 
-# --- Kleine Helfer zum Lesen und Schreiben der JSON-Dateien ------------------
-
-def lade_json(datei):
-    """Liest eine JSON-Datei. Gibt ein leeres Dictionary zurück, wenn sie fehlt."""
-    if datei.exists():
-        return json.loads(datei.read_text(encoding="utf-8"))
+def load_json(path):
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
     return {}
 
 
-def speichere_json(datei, daten):
-    datei.write_text(json.dumps(daten, indent=2), encoding="utf-8")
+def save_json(path, data):
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def hole_client_id():
-    """Liest die Client-ID aus der Konfiguration oder fragt einmalig danach."""
-    config = lade_json(CONFIG_DATEI)
+def get_client_id():
+    config = load_json(CONFIG_FILE)
     if not config.get("client_id"):
-        config["client_id"] = input("Client-ID aus dem Spotify-Dashboard: ").strip()
-        speichere_json(CONFIG_DATEI, config)
-        print("Gespeichert in", CONFIG_DATEI.name)
+        config["client_id"] = input("Client ID from the Spotify dashboard: ").strip()
+        save_json(CONFIG_FILE, config)
+        print("Saved in", CONFIG_FILE.name)
     return config["client_id"]
 
 
-# --- HTTP-Anfragen -----------------------------------------------------------
-
-def sende(methode, url, daten=None, header=None):
-    """
-    Schickt eine HTTP-Anfrage und gibt (Statuscode, Antwort als Dictionary) zurück.
-    Bei einem Fehler (4xx, 5xx) wird nicht abgebrochen, sondern der Fehlertext
-    von Spotify zurückgegeben. So sieht man, was Spotify zu bemängeln hat.
-    """
-    anfrage = urllib.request.Request(url, data=daten, method=methode, headers=header or {})
+def send(method, url, data=None, headers=None):
+    """Returns (status, response as dict). HTTP errors are returned, not
+    raised, so Spotify's error message is visible."""
+    request = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     try:
-        with urllib.request.urlopen(anfrage, timeout=15) as antwort:
-            status, text = antwort.status, antwort.read().decode("utf-8")
-    except urllib.error.HTTPError as fehler:
-        status, text = fehler.code, fehler.read().decode("utf-8")
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status, text = response.status, response.read().decode("utf-8")
+    except urllib.error.HTTPError as err:
+        status, text = err.code, err.read().decode("utf-8")
     try:
-        inhalt = json.loads(text) if text.strip() else {}
+        content = json.loads(text) if text.strip() else {}
     except json.JSONDecodeError:
-        inhalt = {"text": text}
-    return status, inhalt
+        content = {"text": text}
+    return status, content
 
 
-def token_anfrage(felder):
-    """Anfrage an den Token-Server von Spotify (Formulardaten, kein JSON)."""
-    daten = urllib.parse.urlencode(felder).encode("utf-8")
-    header = {"Content-Type": "application/x-www-form-urlencoded"}
-    status, inhalt = sende("POST", TOKEN_URL, daten, header)
+def token_request(fields):
+    data = urllib.parse.urlencode(fields).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    status, content = send("POST", TOKEN_URL, data, headers)
     if status != 200:
-        sys.exit(f"Token-Anfrage fehlgeschlagen ({status}): {inhalt}")
-    return inhalt
+        sys.exit(f"Token request failed ({status}): {content}")
+    return content
 
 
-def speichere_token(antwort, alter_refresh_token=None):
-    """Speichert die Token-Antwort zusammen mit dem Ablaufzeitpunkt."""
+def save_token(response, old_refresh_token=None):
     token = {
-        "access_token": antwort["access_token"],
-        # Beim Erneuern schickt Spotify nicht immer einen neuen Refresh Token.
-        # Dann gilt der alte weiter.
-        "refresh_token": antwort.get("refresh_token", alter_refresh_token),
-        # Der Access Token gilt nur etwa eine Stunde. 60 s Sicherheitsabstand.
-        "laeuft_ab": time.time() + antwort.get("expires_in", 3600) - 60,
+        "access_token": response["access_token"],
+        # Spotify does not always send a new refresh token, then the old one stays valid
+        "refresh_token": response.get("refresh_token", old_refresh_token),
+        # access token is valid for about an hour, 60 s margin
+        "expires_at": time.time() + response.get("expires_in", 3600) - 60,
     }
-    speichere_json(TOKEN_DATEI, token)
+    save_json(TOKEN_FILE, token)
     return token
 
 
-def hole_access_token():
-    """Gibt einen gültigen Access Token zurück und erneuert ihn bei Bedarf."""
-    token = lade_json(TOKEN_DATEI)
+def get_access_token():
+    token = load_json(TOKEN_FILE)
     if not token.get("refresh_token"):
-        sys.exit("Noch nicht angemeldet. Bitte zuerst:  python spotify_test.py login")
+        sys.exit("Not logged in yet. Run first:  python spotify_test.py login")
 
-    if time.time() >= token.get("laeuft_ab", 0):
-        # Abgelaufen: Mit dem Refresh Token einen neuen Access Token holen.
-        antwort = token_anfrage({
+    if time.time() >= token.get("expires_at", 0):
+        response = token_request({
             "grant_type": "refresh_token",
             "refresh_token": token["refresh_token"],
-            "client_id": hole_client_id(),
+            "client_id": get_client_id(),
         })
-        token = speichere_token(antwort, token["refresh_token"])
+        token = save_token(response, token["refresh_token"])
     return token["access_token"]
 
 
-def api(methode, pfad, parameter=None, koerper=None):
-    """Anfrage an die Spotify Web API mit dem Access Token im Header."""
-    url = API_URL + pfad
-    if parameter:
-        url += "?" + urllib.parse.urlencode(parameter)
-    header = {"Authorization": "Bearer " + hole_access_token()}
-    daten = None
-    if koerper is not None:
-        daten = json.dumps(koerper).encode("utf-8")
-        header["Content-Type"] = "application/json"
-    elif methode in ("PUT", "POST"):
-        daten = b""   # leerer Körper, damit eine Content-Length mitgeschickt wird
-    return sende(methode, url, daten, header)
+def api(method, path, params=None, body=None):
+    url = API_URL + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    headers = {"Authorization": "Bearer " + get_access_token()}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    elif method in ("PUT", "POST"):
+        data = b""   # empty body so a Content-Length header is sent
+    return send(method, url, data, headers)
 
 
-# --- Befehl: login -----------------------------------------------------------
+# --- login -------------------------------------------------------------------
 
-def befehl_login():
-    client_id = hole_client_id()
+def cmd_login():
+    client_id = get_client_id()
 
-    # PKCE: Wir denken uns ein Geheimnis aus (Verifier) und schicken Spotify
-    # zunächst nur dessen SHA-256-Hash (Challenge). Beim Tausch des Codes gegen
-    # den Token legen wir den Verifier offen. So kann niemand, der den Code
-    # abfängt, etwas damit anfangen.
+    # PKCE: send only the SHA-256 hash of a random verifier first and reveal
+    # the verifier when exchanging the code, so an intercepted code is useless
     verifier = secrets.token_urlsafe(64)
-    hash_wert = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(hash_wert).decode("ascii").rstrip("=")
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
-    # Zufallswert, den Spotify unverändert zurückschickt. Schutz vor Fälschung.
     state = secrets.token_urlsafe(16)
 
     login_url = AUTH_URL + "?" + urllib.parse.urlencode({
@@ -182,144 +161,134 @@ def befehl_login():
         "state": state,
     })
 
-    ergebnis = {}   # hier legt der kleine Webserver die Antwort von Spotify ab
+    result = {}   # filled by the small web server below
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            teile = urllib.parse.urlparse(self.path)
-            if teile.path != "/callback":      # z. B. /favicon.ico ignorieren
+            parts = urllib.parse.urlparse(self.path)
+            if parts.path != "/callback":      # ignore /favicon.ico etc.
                 self.send_response(404)
                 self.end_headers()
                 return
-            ergebnis.update({k: v[0] for k, v in urllib.parse.parse_qs(teile.query).items()})
+            result.update({k: v[0] for k, v in urllib.parse.parse_qs(parts.query).items()})
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write("<h2>Fertig. Du kannst dieses Fenster schließen.</h2>".encode("utf-8"))
+            self.wfile.write("<h2>Done. You can close this window.</h2>".encode("utf-8"))
 
-        def log_message(self, *args):          # keine Protokollzeilen ausgeben
+        def log_message(self, *args):
             pass
 
-    # Kleiner Webserver auf dem eigenen Rechner, der auf die Rückleitung wartet.
     server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
 
-    print("Der Browser öffnet sich jetzt mit der Spotify-Anmeldung.")
-    print("Falls nicht, diese Adresse von Hand öffnen:\n")
+    print("Opening the Spotify login in your browser.")
+    print("If it does not open, use this address:\n")
     print(login_url, "\n")
     webbrowser.open(login_url)
 
-    while not ergebnis:                        # warten, bis /callback aufgerufen wurde
+    while not result:
         server.handle_request()
     server.server_close()
 
-    if "error" in ergebnis:
-        sys.exit("Spotify meldet einen Fehler: " + ergebnis["error"])
-    if ergebnis.get("state") != state:
-        sys.exit("State stimmt nicht überein. Anmeldung abgebrochen.")
+    if "error" in result:
+        sys.exit("Spotify returned an error: " + result["error"])
+    if result.get("state") != state:
+        sys.exit("State does not match. Login aborted.")
 
-    # Den einmaligen Code gegen Access Token und Refresh Token tauschen.
-    antwort = token_anfrage({
+    response = token_request({
         "grant_type": "authorization_code",
-        "code": ergebnis["code"],
+        "code": result["code"],
         "redirect_uri": REDIRECT_URI,
         "client_id": client_id,
         "code_verifier": verifier,
     })
-    speichere_token(antwort)
-    print("Anmeldung erfolgreich. Token gespeichert in", TOKEN_DATEI.name)
+    save_token(response)
+    print("Login successful. Token saved in", TOKEN_FILE.name)
 
 
-# --- Befehl: devices ---------------------------------------------------------
+# --- devices -----------------------------------------------------------------
 
-def hole_geraete():
-    status, inhalt = api("GET", "/me/player/devices")
+def get_devices():
+    status, content = api("GET", "/me/player/devices")
     if status != 200:
-        sys.exit(f"Geräte konnten nicht abgefragt werden ({status}): {inhalt}")
-    return inhalt.get("devices", [])
+        sys.exit(f"Could not get devices ({status}): {content}")
+    return content.get("devices", [])
 
 
-def befehl_devices():
-    geraete = hole_geraete()
-    if not geraete:
-        print("Keine Geräte gefunden.")
-        print("Tipp: Auf dem Echo kurz etwas über Spotify abspielen und erneut versuchen.")
+def cmd_devices():
+    devices = get_devices()
+    if not devices:
+        print("No devices found.")
+        print("Tip: play something from Spotify on the Echo briefly, then try again.")
         return
-    for g in geraete:
-        aktiv = "aktiv" if g["is_active"] else "     "
-        print(f"  {aktiv}  {g['name']:<30} {g['type']:<12} {g['id']}")
+    for d in devices:
+        active = "active" if d["is_active"] else "      "
+        print(f"  {active}  {d['name']:<30} {d['type']:<12} {d['id']}")
 
 
-def finde_geraet(suchtext):
-    """Sucht ein Gerät über einen Teil des Namens. Ohne Suchtext: das einzige Gerät."""
-    geraete = hole_geraete()
-    if suchtext:
-        treffer = [g for g in geraete if suchtext.lower() in g["name"].lower()]
+def find_device(search):
+    """Finds a device by part of its name. Without search: the only device."""
+    devices = get_devices()
+    if search:
+        matches = [d for d in devices if search.lower() in d["name"].lower()]
     else:
-        treffer = geraete
-    if len(treffer) == 1:
-        return treffer[0]
-    namen = ", ".join(g["name"] for g in geraete) or "keine"
-    sys.exit(f"Gerät nicht eindeutig. Gefundene Geräte: {namen}")
+        matches = devices
+    if len(matches) == 1:
+        return matches[0]
+    names = ", ".join(d["name"] for d in devices) or "none"
+    sys.exit(f"Device not unique. Devices found: {names}")
 
 
-# --- Befehl: play ------------------------------------------------------------
+# --- play / pause --------------------------------------------------------------
 
-def zu_uri(link):
-    """
-    Wandelt einen Spotify-Link in eine Spotify-URI um.
-      https://open.spotify.com/album/ABC?si=xyz   ->   spotify:album:ABC
-    Dieselbe Umwandlung macht später der ESP32 mit dem Link vom NFC-Sticker.
-    """
+def to_uri(link):
+    """https://open.spotify.com/album/ABC?si=xyz  ->  spotify:album:ABC"""
     if link.startswith("spotify:"):
         return link
-    treffer = re.search(r"open\.spotify\.com/(?:intl-[a-z]+/)?(album|playlist|track)/([A-Za-z0-9]+)", link)
-    if not treffer:
-        sys.exit("Das ist kein Spotify-Link zu Album, Playlist oder Titel: " + link)
-    return f"spotify:{treffer.group(1)}:{treffer.group(2)}"
+    match = re.search(r"open\.spotify\.com/(?:intl-[a-z]+/)?(album|playlist|track)/([A-Za-z0-9]+)", link)
+    if not match:
+        sys.exit("Not a Spotify link to an album, playlist or track: " + link)
+    return f"spotify:{match.group(1)}:{match.group(2)}"
 
 
-def befehl_play(link, suchtext):
-    uri = zu_uri(link)
-    geraet = finde_geraet(suchtext)
+def cmd_play(link, search):
+    uri = to_uri(link)
+    device = find_device(search)
 
-    # Alben und Playlists sind ein "Kontext", einzelne Titel eine Liste von URIs.
+    # albums and playlists are a "context", single tracks a list of URIs
     if uri.startswith("spotify:track:"):
-        koerper = {"uris": [uri]}
+        body = {"uris": [uri]}
     else:
-        koerper = {"context_uri": uri}
+        body = {"context_uri": uri}
 
-    status, inhalt = api("PUT", "/me/player/play", {"device_id": geraet["id"]}, koerper)
+    status, content = api("PUT", "/me/player/play", {"device_id": device["id"]}, body)
     if status in (200, 202, 204):
-        print(f"Spiele {uri} auf {geraet['name']}")
+        print(f"Playing {uri} on {device['name']}")
     else:
-        print(f"Fehler ({status}): {inhalt}")
+        print(f"Error ({status}): {content}")
 
 
-# --- Befehl: pause -----------------------------------------------------------
-
-def befehl_pause(suchtext):
-    geraet = finde_geraet(suchtext)
-    status, inhalt = api("PUT", "/me/player/pause", {"device_id": geraet["id"]})
+def cmd_pause(search):
+    device = find_device(search)
+    status, content = api("PUT", "/me/player/pause", {"device_id": device["id"]})
     if status in (200, 202, 204):
-        print("Pausiert auf", geraet["name"])
+        print("Paused on", device["name"])
     else:
-        print(f"Fehler ({status}): {inhalt}")
+        print(f"Error ({status}): {content}")
 
-
-# --- Hauptprogramm -----------------------------------------------------------
 
 def main():
-    argumente = sys.argv[1:]
-    befehl = argumente[0] if argumente else ""
+    args = sys.argv[1:]
+    cmd = args[0] if args else ""
 
-    if befehl == "login":
-        befehl_login()
-    elif befehl == "devices":
-        befehl_devices()
-    elif befehl == "play" and len(argumente) >= 2:
-        befehl_play(argumente[1], argumente[2] if len(argumente) > 2 else None)
-    elif befehl == "pause":
-        befehl_pause(argumente[1] if len(argumente) > 1 else None)
+    if cmd == "login":
+        cmd_login()
+    elif cmd == "devices":
+        cmd_devices()
+    elif cmd == "play" and len(args) >= 2:
+        cmd_play(args[1], args[2] if len(args) > 2 else None)
+    elif cmd == "pause":
+        cmd_pause(args[1] if len(args) > 1 else None)
     else:
         print(__doc__)
 
