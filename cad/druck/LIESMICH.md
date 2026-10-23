@@ -10,13 +10,16 @@ Sortiert nach Farbe. 01 bis 10 sind grau, dazu gehören auch alle Teile, die inn
 | 02_Bodenplatte_grau | grau | ja, nur unter dem Motorhalter | Brim |
 | 03_Lagerdeckel_grau | grau | nein | trägt den RC522, wird lose auf den Ring gesetzt |
 | 04_Lagerstift_grau | grau | nein | wird in den Lagerdeckel geklebt |
+| 04b_Anlaufring_grau | grau | nein | Ø36 x 1,6 mm, wird mittig unter den Becher geklebt, glatte Bettseite nach unten. Becher liegt dann flach auf statt auf der Stiftspitze und kippt nicht mehr unter Riemenzug |
 | 05_Riemenrad_grau | grau | nein | alte Version, ersetzt durch V2 |
 | 05_Riemenrad_V2_grau | grau | nein | nicht mehr nötig, ersetzt durch V3 |
 | 05_Riemenrad_V3_grau | grau | nein | Flansch auf dem Bett, Rille 6 mm hoch, Rillengrund 1 mm größer als beim alten Rad für mehr Spannung, Nabe nach oben |
 | 05b_Riemenrad_Kappe_eng / _locker | grau | nein | nicht mehr nötig, der Käfig hält den Riemen |
 | 05c_Riemenkaefig_grau | grau | ja, nur unter der unteren Lippe | liegt kopfüber, wird um das Riemenrad auf den Boden geklebt, Öffnung zeigt zum Teller |
+| 05d_Spannrolle_Set_grau | grau | nein | Grundplatte mit zwei Augen für M2-Einschmelzmuttern, Schlitten mit Langloch und angedruckter Achse 6 mm, Rolle mit 9 mm hoher Rille, Klemmring oben. Nur zwei kurze M2 (6 bis 8 mm) nötig |
 | 06_Tonarm_Anschlagring_grau | grau | nein | sitzt unter dem Deckel |
 | 06b_Schalterhebel_Auflage_grau | grau | nein | vier Plättchen 4 mm breit, 0,6 / 1,0 / 1,4 / 1,8 mm dick (kürzestes ist das dünnste), passendes auf den Hebel vom Tonarm-Mikroschalter kleben |
+| 06b_Schalterhebel_Auflage_5x6x1-8_grau | grau | nein | einzelnes Plättchen 5 x 6 mm, 1,8 mm dick, für den Hebel vom Tonarm-Mikroschalter |
 | 07_Bedienhalter_Taster_Encoder_grau | grau | nein | wird von unten an die zwei Dome der Taster geschraubt |
 | 07b_Encoder_Stuetze_grau | grau | nein | stützt den Drehgeber von unten ab, Höhe vor dem Druck an den Messwert anpassen |
 | 08_Shuffle_Halter_grau | grau | nein | nimmt den 12x12-Taster auf, wird unter den Deckel geklebt |
@@ -62,3 +65,5 @@ Namensschild mit AMS. In Bambu Studio in der Vorschau den Schieberegler auf die 
 12. Shuffle-Taster an GPIO 17 und GND (Stecker J8). Linke Tastenkappe ist Zurück (GPIO 33), rechte ist Weiter (GPIO 32).
 13. Namensschild unten links an die Front kleben, etwa 12 mm vom linken Rand und 4 mm über der Unterkante. Sekundenkleber in kleinen Punkten auf die Rückseite, sonst quillt er an den Rändern raus.
 14. Encoder-Stütze. Sie steht auf dem Boden genau unter dem Drehgeber und drückt von unten gegen die Platine vom KY-040, damit die Plattform beim Drücken des Knopfs nicht nachgibt. Vor dem Druck messen, wie weit es von der Unterkante des Oberteils bis zur Unterseite der KY-040-Platine ist. Diesen Wert in Bambu Studio als Höhe (Z) eintragen, die Datei hat 30 mm. Oben kommt ein Streifen doppelseitiges Schaumklebeband (etwa 1 mm) auf den Rand, damit klebt sie an der Platine und hat etwas Vorspannung. Die Vertiefung oben lässt Platz für die Lötstellen. Beim Zuschrauben des Bodens wird sie dann von unten angedrückt.
+15. Spannrolle. Zwei M2-Einschmelzmuttern in die Augen der Grundplatte setzen und die Platte neben dem Riemen auf den Boden kleben, die lange Seite zeigt in Richtung Riemen. Schlitten drauflegen, Rolle auf die Achse stecken und den Ring oben aufdrücken. Schlitten gegen den Riemen schieben, bis er gerade fest genug ist, dann mit zwei kurzen M2 durchs Langloch in die Muttern festziehen. Am besten nah am Riemenrad auf der Seite, wo der Riemen locker durchhängt.
+16. Anlaufring. Becher abnehmen und umgedreht hinlegen. Einen 6er Bohrer als Zentrierstift in die Bohrung stecken, den Ring mit der glatten Seite nach oben drüberschieben und mit drei, vier kleinen Punkten Sekundenkleber auf die Unterseite vom Becher kleben. Nach dem Trocknen etwas Vaseline oder Öl auf den Lagerdeckel rund um den Stift geben und den Becher wieder aufsetzen. Der Teller sitzt dadurch gut 1 mm höher und hat über dem Deckel etwa 2 mm Luft. Die Spannrolle nur so weit anstellen, dass der Riemen nicht durchhängt.
