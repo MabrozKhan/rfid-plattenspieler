@@ -123,6 +123,12 @@ const uint8_t  START_ROUNDS         = 3;       // automatic retries
 const uint32_t START_ROUND_PAUSE_MS = 10000;
 // Watchdog: restart if spotifyTask hangs for this long
 const uint32_t WATCHDOG_MS          = 120000;
+// Motor watchdog: if the platter should turn but no step was made for this
+// long, the motor task is started again. After MOTOR_RESTARTS_MAX restarts
+// within an hour the whole ESP32 restarts.
+const uint32_t MOTOR_WATCHDOG_MS    = 3000;
+const uint8_t  MOTOR_RESTARTS_MAX   = 3;
+const uint32_t MOTOR_LOG_MS         = 60000;   // status line on the serial monitor
 
 // --- Display ---
 // GPIO 22 is used by the RC522, so SCL is on GPIO 4
@@ -166,6 +172,10 @@ volatile bool     motorShouldRun  = false;
 volatile uint32_t startedRecordNo = 0;
 // written by spotifyTask(): last sign of life, for the watchdog
 volatile uint32_t spotifyAliveMs  = 0;
+// written by motorTask(): step counter and time of the last step, for the motor watchdog
+volatile uint32_t motorSteps      = 0;
+volatile uint32_t motorStepMs     = 0;
+TaskHandle_t      motorHandle     = NULL;
 
 // --- loop() only ---
 MFRC522  rfid(PIN_SS, PIN_RST);
@@ -1396,16 +1406,66 @@ void motorTask(void* params) {
         step = (step + (MOTOR_REVERSE ? 7 : 1)) & 7;
       }
       coilsOn = true;
+      motorSteps++;
+      motorStepMs = millis();
       vTaskDelayUntil(&lastStep, pdMS_TO_TICKS(MOTOR_STEP_MS));
     } else {
       if (coilsOn) {                              // no current through the coils at standstill
         for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_MOTOR[i], LOW);
         coilsOn = false;
       }
+      motorStepMs = millis();                     // standing still on purpose counts as alive
       vTaskDelay(pdMS_TO_TICKS(20));
       lastStep = xTaskGetTickCount();
     }
   }
+}
+
+// Starts the motor task (again). The pins are set up fresh every time.
+void startMotorTask() {
+  for (uint8_t i = 0; i < 4; i++) {
+    pinMode(PIN_MOTOR[i], OUTPUT);
+    digitalWrite(PIN_MOTOR[i], LOW);
+  }
+  motorStepMs = millis();
+  xTaskCreatePinnedToCore(motorTask, "motor", 2048, NULL, 2, &motorHandle, 1);
+}
+
+// Called from loop(). Notices a stopped motor task and brings it back.
+void checkMotor() {
+  static uint8_t  restarts       = 0;
+  static uint32_t firstRestartMs = 0;
+  static uint32_t lastLogMs      = 0;
+  static uint32_t stepsAtLastLog = 0;
+
+  if (millis() - lastLogMs >= MOTOR_LOG_MS) {
+    lastLogMs = millis();
+    Serial.printf("Motor: %s, %lu steps in the last minute, uptime %lu min\n",
+                  motorShouldRun ? "on" : "off",
+                  (unsigned long)(motorSteps - stepsAtLastLog),
+                  (unsigned long)(millis() / 60000));
+    stepsAtLastLog = motorSteps;
+  }
+
+  if (!motorShouldRun) return;
+  if (millis() - motorStepMs <= MOTOR_WATCHDOG_MS) return;
+
+  if (restarts == 0 || millis() - firstRestartMs > 3600000UL) {
+    restarts = 0;
+    firstRestartMs = millis();
+  }
+  restarts++;
+  Serial.printf("Motor task stuck (no step for %lu ms). Restart %u of %u.\n",
+                (unsigned long)(millis() - motorStepMs), restarts, MOTOR_RESTARTS_MAX);
+  if (restarts > MOTOR_RESTARTS_MAX) {
+    Serial.println("Motor keeps stopping. Restarting the ESP32...");
+    showNote("Restarting...");
+    delay(1500);
+    ESP.restart();
+  }
+  if (motorHandle != NULL) vTaskDelete(motorHandle);
+  motorHandle = NULL;
+  startMotorTask();
 }
 
 // ===========================================================================
@@ -1498,7 +1558,7 @@ void setup() {
   // Motor on core 1 with a higher priority than loop().
   spotifyAliveMs = millis();
   xTaskCreatePinnedToCore(spotifyTask, "spotify", 12288, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(motorTask,   "motor",   2048,  NULL, 2, NULL, 1);
+  startMotorTask();
   if (displayOk) {
     xTaskCreatePinnedToCore(displayTask, "display", 4096, NULL, 1, NULL, 1);
   }
@@ -1523,6 +1583,7 @@ void loop() {
   }
 
   updatePlayback();
+  checkMotor();
 
   // watchdog: if spotifyTask has not reported for too long it is stuck
   if (millis() - spotifyAliveMs > WATCHDOG_MS) {
